@@ -90,70 +90,98 @@ const EditorPanel = ({ problem, onSkip, onSubmit, timeRemaining }) => {
     }
   };
 
-  // Handle code submission
+  // Handle Run Code - Test against visible test cases
+  const handleRunCode = async () => {
+    setIsLoading(true);
+    setOutput(null);
+
+    try {
+      const response = await fetch(`http://localhost:5000/api/problems/run/${encodeURIComponent(problem.title)}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          code: code,
+          language: language,
+        }),
+      });
+
+      const result = await response.json();
+      
+      if (!response.ok) {
+        setOutput({
+          type: 'error',
+          message: result.error || 'Failed to run code',
+          details: result.details,
+        });
+      } else {
+        setOutput({
+          type: 'run',
+          results: result.results,
+        });
+      }
+
+      setIsLoading(false);
+    } catch (error) {
+      setOutput({
+        type: 'error',
+        message: 'Network error occurred',
+        details: error.message,
+      });
+      setIsLoading(false);
+    }
+  };
+
+  // Handle Submit Code - Test against all test cases
   const handleSubmitCode = async () => {
     setIsLoading(true);
     setOutput(null);
 
     try {
-      // Construct the payload
-      const payload = {
-        code: code,
-        language: language,
-        problemTitle: problem?.title || '',
-        problemId: problem?._id || '',
-        timeRemaining: timeRemaining,
-      };
+      const response = await fetch(`http://localhost:5000/api/problems/submit/${encodeURIComponent(problem.title)}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          code: code,
+          language: language,
+        }),
+      });
 
-      // [API CALL PLACEHOLDER]
-      // Replace this with your actual API endpoint
-      // const response = await fetch('YOUR_API_URL/submit-code', {
-      //   method: 'POST',
-      //   headers: {
-      //     'Content-Type': 'application/json',
-      //   },
-      //   body: JSON.stringify(payload),
-      // });
-      // const result = await response.json();
-
-      // Simulated API response for demonstration
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      const result = await response.json();
       
-      // Simulate different responses randomly
-      const random = Math.random();
-      const result = random > 0.5
-        ? {
-            status: 'Accepted',
-            message: 'All 10 test cases passed!',
-            testsPassed: 10,
-            totalTests: 10,
-          }
-        : {
-            status: 'Wrong Answer',
-            message: 'Test case 3 failed',
-            testsPassed: 2,
-            totalTests: 10,
-            failedInput: '[3,2,4], target = 6',
-            expectedOutput: '[1,2]',
-            actualOutput: '[0,1]',
-          };
+      if (!response.ok) {
+        setOutput({
+          type: 'error',
+          message: result.error || 'Failed to submit code',
+          details: result.details,
+        });
+      } else {
+        setOutput({
+          type: 'submit',
+          ...result,
+        });
 
-      setOutput(result);
-      
-      // Move to next question after showing result
-      setTimeout(() => {
-        if (onSubmit) {
-          onSubmit(code, result);
+        // If submission was accepted, move to next question after 3 seconds
+        if (result.status === 'Accepted') {
+          setTimeout(() => {
+            if (onSubmit) {
+              onSubmit(code, result);
+            }
+          }, 3000);
         }
-      }, 3000); // Show result for 3 seconds before moving to next
+      }
+
+      setIsLoading(false);
     } catch (error) {
       setOutput({
-        status: 'Error',
-        message: error.message || 'An error occurred while submitting your code.',
+        type: 'error',
+        message: 'Network error occurred',
+        details: error.message,
       });
       setIsLoading(false);
-    } finally {
-      // Keep loading state until moving to next question
     }
   };
 
@@ -186,81 +214,187 @@ const EditorPanel = ({ problem, onSkip, onSubmit, timeRemaining }) => {
               </p>
             </div>
           )}
-          <p>Click "Submit" to evaluate your solution or "Skip" to move to next question</p>
+          <p>Click "Run Code" to test with sample cases or "Submit" to evaluate your solution</p>
         </div>
       );
     }
 
-    const isSuccess = output.status === 'Accepted';
-    const isError = output.status === 'Wrong Answer' || output.status === 'Error';
-
-    return (
-      <div className="p-4">
-        <div
-          className={`p-4 rounded-lg mb-4 ${
-            isSuccess
-              ? 'bg-green-50 border border-green-200'
-              : isError
-              ? 'bg-red-50 border border-red-200'
-              : 'bg-yellow-50 border border-yellow-200'
-          }`}
-        >
-          <div className="flex items-center mb-2">
-            <span
-              className={`text-lg font-semibold ${
-                isSuccess
-                  ? 'text-green-700'
-                  : isError
-                  ? 'text-red-700'
-                  : 'text-yellow-700'
-              }`}
-            >
-              {output.status}
-            </span>
+    // Handle Error output
+    if (output.type === 'error') {
+      return (
+        <div className="p-4">
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+            <div className="flex items-center mb-2">
+              <svg className="w-5 h-5 text-red-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span className="text-lg font-semibold text-red-700">Error</span>
+            </div>
+            <p className="text-red-700">{output.message}</p>
+            {output.details && (
+              <pre className="mt-2 text-sm text-red-600 bg-white p-2 rounded overflow-auto">
+                {output.details}
+              </pre>
+            )}
           </div>
-          <p
-            className={`${
-              isSuccess
-                ? 'text-green-700'
-                : isError
-                ? 'text-red-700'
-                : 'text-yellow-700'
+        </div>
+      );
+    }
+
+    // Handle Run Code output (detailed test case results)
+    if (output.type === 'run') {
+      return (
+        <div className="p-4 overflow-auto">
+          <h3 className="text-lg font-semibold text-gray-800 mb-4">Test Results</h3>
+          <div className="space-y-3">
+            {output.results.map((result, index) => {
+              const isAccepted = result.status === 'Accepted';
+              return (
+                <div
+                  key={index}
+                  className={`border rounded-lg p-3 ${
+                    isAccepted ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-semibold text-sm text-gray-700">
+                      Test Case {index + 1}
+                    </span>
+                    <span
+                      className={`px-2 py-1 rounded text-sm font-medium ${
+                        isAccepted ? 'bg-green-200 text-green-800' : 'bg-red-200 text-red-800'
+                      }`}
+                    >
+                      {result.status}
+                    </span>
+                  </div>
+
+                  <div className="text-sm space-y-1">
+                    <div>
+                      <span className="font-medium text-gray-600">Input: </span>
+                      <code className="bg-white px-2 py-1 rounded text-xs">
+                        {result.testCase}
+                      </code>
+                    </div>
+
+                    {result.stdout && (
+                      <div>
+                        <span className="font-medium text-gray-600">Output: </span>
+                        <code className="bg-white px-2 py-1 rounded text-xs">
+                          {result.stdout.trim()}
+                        </code>
+                      </div>
+                    )}
+
+                    {result.stderr && (
+                      <div>
+                        <span className="font-medium text-red-600">Error: </span>
+                        <pre className="bg-white px-2 py-1 rounded text-xs text-red-600 overflow-auto">
+                          {result.stderr}
+                        </pre>
+                      </div>
+                    )}
+
+                    {result.compile_output && (
+                      <div>
+                        <span className="font-medium text-red-600">Compile Error: </span>
+                        <pre className="bg-white px-2 py-1 rounded text-xs text-red-600 overflow-auto">
+                          {result.compile_output}
+                        </pre>
+                      </div>
+                    )}
+
+                    {result.time && (
+                      <div className="text-gray-500 text-xs">
+                        Time: {result.time}s | Memory: {result.memory} KB
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      );
+    }
+
+    // Handle Submit output (summary)
+    if (output.type === 'submit') {
+      const isAccepted = output.status === 'Accepted';
+      return (
+        <div className="p-4">
+          <div
+            className={`p-4 rounded-lg ${
+              isAccepted ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'
             }`}
           >
-            {output.message}
-          </p>
-
-          {output.testsPassed !== undefined && (
-            <p className="mt-2 text-sm text-gray-600">
-              Tests Passed: {output.testsPassed}/{output.totalTests}
-            </p>
-          )}
-
-          {output.failedInput && (
-            <div className="mt-3 text-sm">
-              <p className="text-gray-700">
-                <span className="font-medium">Input: </span>
-                <code className="bg-white px-2 py-1 rounded">
-                  {output.failedInput}
-                </code>
-              </p>
-              <p className="text-gray-700 mt-1">
-                <span className="font-medium">Expected: </span>
-                <code className="bg-white px-2 py-1 rounded">
-                  {output.expectedOutput}
-                </code>
-              </p>
-              <p className="text-gray-700 mt-1">
-                <span className="font-medium">Your Output: </span>
-                <code className="bg-white px-2 py-1 rounded">
-                  {output.actualOutput}
-                </code>
-              </p>
+            <div className="flex items-center mb-2">
+              {isAccepted ? (
+                <svg className="w-6 h-6 text-green-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              ) : (
+                <svg className="w-6 h-6 text-red-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              )}
+              <span className={`text-lg font-semibold ${isAccepted ? 'text-green-700' : 'text-red-700'}`}>
+                {output.status}
+              </span>
             </div>
-          )}
+
+            {isAccepted ? (
+              <div>
+                <p className="text-green-700 mb-2">All test cases passed!</p>
+                <p className="text-sm text-gray-600">
+                  Total: {output.totalTestCases} test cases
+                </p>
+                <p className="text-sm text-green-600 mt-2">Moving to next question...</p>
+              </div>
+            ) : (
+              <div>
+                <p className="text-red-700 mb-2">Failed on test case {output.testCaseNumber} of {output.totalTestCases}</p>
+                
+                {output.compile_output && (
+                  <div className="mt-3">
+                    <span className="font-medium text-red-600">Compile Error:</span>
+                    <pre className="bg-white p-2 rounded text-sm text-red-600 mt-1 overflow-auto">
+                      {output.compile_output}
+                    </pre>
+                  </div>
+                )}
+
+                {output.stderr && (
+                  <div className="mt-3">
+                    <span className="font-medium text-red-600">Runtime Error:</span>
+                    <pre className="bg-white p-2 rounded text-sm text-red-600 mt-1 overflow-auto">
+                      {output.stderr}
+                    </pre>
+                  </div>
+                )}
+
+                {output.stdout && (
+                  <div className="mt-3 text-sm">
+                    <span className="font-medium text-gray-700">Your Output: </span>
+                    <code className="bg-white px-2 py-1 rounded">{output.stdout}</code>
+                  </div>
+                )}
+
+                {output.expected && (
+                  <div className="mt-2 text-sm">
+                    <span className="font-medium text-gray-700">Expected: </span>
+                    <code className="bg-white px-2 py-1 rounded">{output.expected}</code>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
-      </div>
-    );
+      );
+    }
+
+    // Fallback
+    return null;
   };
 
   return (
@@ -327,6 +461,24 @@ const EditorPanel = ({ problem, onSkip, onSubmit, timeRemaining }) => {
         <div className="bg-gray-200 px-4 py-2 flex items-center justify-between border-b border-gray-300 flex-shrink-0">
           <h3 className="font-semibold text-gray-800">Output</h3>
           <div className="flex items-center space-x-3">
+            {/* Run Code Button */}
+            <button
+              onClick={handleRunCode}
+              disabled={isLoading}
+              className={`px-4 py-2 rounded font-medium flex items-center space-x-2 ${
+                isLoading
+                  ? 'bg-gray-400 cursor-not-allowed text-gray-200'
+                  : 'bg-blue-600 hover:bg-blue-700 text-white'
+              }`}
+              title="Run code with sample test cases"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span>Run Code</span>
+            </button>
+
             {/* Skip Button */}
             <button
               onClick={handleSkipQuestion}
@@ -353,7 +505,7 @@ const EditorPanel = ({ problem, onSkip, onSubmit, timeRemaining }) => {
                   ? 'bg-gray-400 cursor-not-allowed text-gray-200'
                   : 'bg-green-600 hover:bg-green-700 text-white'
               }`}
-              title="Submit your solution"
+              title="Submit your solution for evaluation"
             >
               {isLoading ? (
                 <>

@@ -358,10 +358,23 @@ public class Main {
       cpp: String.raw`
 #include <iostream>
 #include <string>
-#include "json.hpp"
-
-using json = nlohmann::json;
 using namespace std;
+
+string parseStringValue(const string& json_str) {
+    size_t sPos = json_str.find("\"s\"");
+    if (sPos == string::npos) return "";
+    
+    size_t colonPos = json_str.find(':', sPos);
+    if (colonPos == string::npos) return "";
+    
+    size_t firstQuote = json_str.find('"', colonPos);
+    if (firstQuote == string::npos) return "";
+    
+    size_t secondQuote = json_str.find('"', firstQuote + 1);
+    if (secondQuote == string::npos) return "";
+    
+    return json_str.substr(firstQuote + 1, secondQuote - firstQuote - 1);
+}
 
 // [USER_CODE_WILL_BE_INSERTED_HERE]
 
@@ -372,19 +385,12 @@ int main() {
         input_json_str += line;
     }
     
-    try {
-        json data = json::parse(input_json_str);
-        
-        string s_input = data["s"].get<string>();
-        
-        Solution s;
-        bool result = s.isPalindrome(s_input);
-        
-        cout << json(result).dump() << endl;
-        
-    } catch (exception& e) {
-        cerr << "Error: " << e.what() << endl;
-    }
+    string s_input = parseStringValue(input_json_str);
+    
+    Solution s;
+    bool result = s.isPalindrome(s_input);
+    
+    cout << (result ? "true" : "false") << endl;
     
     return 0;
 }
