@@ -1,0 +1,6 @@
+fastapi==0.115.0
+uvicorn==0.30.3
+google-generativeai
+requests==2.31.0
+beautifulsoup4==4.12.3
+python-dotenv==1.0.1
