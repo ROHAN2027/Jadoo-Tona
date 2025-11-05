@@ -1,70 +1,48 @@
 import axios from 'axios';
-import Problem from '../models/Problem.js'; 
+import Problem from '../models/problems.model.js'; // Make sure this path is correct
+import 'dotenv/config'; 
 
 // --- Helper: Map friendly names to Judge0 Language IDs ---
 const languageMap = {
   python: 71,
   javascript: 93,
-  cpp: 54, // Example: C++ (GCC 9.2.0)
+  cpp: 54, 
 };
 
 // --- Helper: Get API Keys from Environment Variables ---
-// IMPORTANT: Add these to a .env file
 const JUDGE0_API_KEY = process.env.JUDGE0_API_KEY;
 const JUDGE0_API_HOST = 'judge0-ce.p.rapidapi.com';
 const JUDGE0_URL = `https://${JUDGE0_API_HOST}/submissions`;
 
 /**
  * --- Helper: Builds the full runnable script ---
- * This is the "driver code" part. It combines the user's
- * function with the test case input to make a runnable script.
+ *
+ * This is the CORRECT, simplified function.
+ * It just combines the user's code with the driver code
+ * template from the database.
  */
-const buildDriverScript = (language, userCode, testCaseInput) => {
-  if (language === 'python') {
-    // Assumes userCode is a class 'Solution' with a method 'twoSum'
-    // and testCaseInput is like "[2, 7, 11, 15], 9"
-    return `
+const buildDriverScript = (userCode, driverTemplate, testCaseInput) => {
+  // Replace the placeholder with the actual test case input
+  const driver = driverTemplate.replace(/\$\{input\}/g, testCaseInput);
+
+  // Just combine them. All language-specific logic (like #includes
+  // or 'try/catch') should be IN THE TEMPLATE from the database.
+  return `
 ${userCode}
 
-# Driver code
-try:
-    s = Solution()
-    # Dynamically unpack the test case input
-    result = s.twoSum(${testCaseInput})
-    print(result) # Print result to stdout
-except Exception as e:
-    print(e)
+${driver}
 `;
-  } else if (language === 'javascript') {
-    // Assumes userCode is a function 'twoSum'
-    // and testCaseInput is like "[2, 7, 11, 15], 9"
-    return `
-${userCode}
-
-// Driver code
-try {
-    // Dynamically unpack the test case input
-    const [nums, target] = [${testCaseInput}];
-    const result = twoSum(nums, target);
-    console.log(result); // Print result to stdout
-} catch (e) {
-    console.error(e);
-}
-`;
-  }
-  // Add more languages (like C++) here
-  return userCode; // Fallback
 };
 
 /**
  * --- The Main Controller ---
- * Handles the POST /submit/:slug request
+ * Handles the POST /submit/:title request
+ * (This is the same as the last version, which was correct)
  */
 export const handleSubmit = async (req, res) => {
-  const { slug } = req.params;
+  const { title } = req.params;
   const { code, language } = req.body;
 
-  // 1. Input Validation
   if (!code || !language) {
     return res.status(400).json({ error: 'Code and language are required.' });
   }
@@ -75,31 +53,38 @@ export const handleSubmit = async (req, res) => {
   }
 
   try {
-    // 2. Find the problem and its test cases
-    const problem = await Problem.findOne({ slug: slug });
+    const problem = await Problem.findOne({ title: title }).select(
+      'testcase driver_code'
+    );
+    
     if (!problem) {
       return res.status(404).json({ error: 'Problem not found.' });
     }
 
-    // 3. Loop through each test case and call Judge0
-    for (const testCase of problem.test_cases) {
-      // 3a. Build the full script
-      const script = buildDriverScript(language, code, testCase.input);
+    const driverTemplate = problem.driver_code.get(language);
+    
+    if (!driverTemplate) {
+      return res.status(400).json({
+        error: `Driver code for language "${language}" not found for this problem.`,
+      });
+    }
 
-      // 3b. Encode for Judge0
+    for (const testCase of problem.testcase) {
+      const script = buildDriverScript(
+        code,           // The user's submitted code
+        driverTemplate, // The template from the DB
+        testCase.input  // The specific test case input
+      );
+
       const source_code_b64 = Buffer.from(script).toString('base64');
       const expected_output_b64 = Buffer.from(
         testCase.expected_output
       ).toString('base64');
 
-      // 3c. Set up Judge0 API call
       const options = {
         method: 'POST',
         url: JUDGE0_URL,
-        params: {
-          base64_encoded: 'true',
-          wait: 'true', // Wait for the submission to finish
-        },
+        params: { base64_encoded: 'true', wait: 'true' },
         headers: {
           'Content-Type': 'application/json',
           'X-RapidAPI-Key': JUDGE0_API_KEY,
@@ -109,18 +94,14 @@ export const handleSubmit = async (req, res) => {
           language_id: language_id,
           source_code: source_code_b64,
           expected_output: expected_output_b64,
-          // We don't need stdin because the input is in the script
         },
       };
 
-      // 3d. Make the API call
       const response = await axios.request(options);
       const result = response.data;
       const status = result.status.description;
 
-      // 3e. Check if this test case failed
       if (status !== 'Accepted') {
-        // Decode error messages from base64
         const compile_output = result.compile_output
           ? Buffer.from(result.compile_output, 'base64').toString('utf-8')
           : null;
@@ -128,20 +109,18 @@ export const handleSubmit = async (req, res) => {
           ? Buffer.from(result.stderr, 'base64').toString('utf-8')
           : null;
 
-        // Stop and send the *first* failure
         return res.json({
           status: status,
           testCase: testCase.input,
           compile_output: compile_output,
-          stderr: stderr,
+          stderr: stderr || "Runtime Error",
         });
       }
     }
 
-    // 4. If all test cases passed
     return res.status(200).json({ status: 'Accepted' });
+
   } catch (error) {
-    // Handle errors from DB query or Judge0 call
     console.error('Submission Error:', error.response?.data || error.message);
     res.status(500).json({ error: 'An internal server error occurred.' });
   }

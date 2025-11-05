@@ -1,5 +1,4 @@
 import mongoose from 'mongoose';
-import { stringify } from 'uuid';
 
 const TestCaseSchema = new mongoose.Schema({
   input: {
@@ -16,9 +15,9 @@ const ProblemSchema = new mongoose.Schema({
   title: {
     type: String,
     required: [true, 'Problem title is required'],
+    unique: true,
     trim: true,
   },
-  
   description: {
     type: String,
     required: [true, 'Problem description is required'],
@@ -33,20 +32,26 @@ const ProblemSchema = new mongoose.Schema({
     of: String,
     required: true,
   },
-  testcase:{
-    type : [TestCaseSchema],
-    required:true,
-  },
   
-  examples:{
-    type: String,
-    required: [true]
+  // --- NEW FIELD ADDED HERE ---
+  driver_code: {
+    type: Map,
+    of: String, // e.g., { "python": "s = Solution()...\nprint(result)" }
+    required: [true, 'Driver code is required'],
   },
-  constraints:{
-    type: String,
-    required:[true]
-  }
 
+  testcase: {
+    type: [TestCaseSchema],
+    required: true,
+  },
+  examples: {
+    type: String,
+    required: [true, 'Examples are required'], // Added a more specific message
+  },
+  constraints: {
+    type: String,
+    required: [true, 'Constraints are required'], // Added a more specific message
+  }
 }, { timestamps: true }); 
 
 const Problem = mongoose.model('Problem', ProblemSchema);
