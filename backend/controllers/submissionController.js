@@ -177,6 +177,8 @@ export const handleRun = async (req, res) => {
       return res.status(404).json({ error: 'Problem not found.' });
     }
 
+    console.log(`[RUN] Running against ${problem.testcase.length} visible test cases for problem: ${title}`);
+
     const driverTemplate = problem.driver_code.get(language);
     if (!driverTemplate) {
       return res.status(400).json({ error: `Driver code for ${language} not found.` });
@@ -226,13 +228,21 @@ export const handleSubmit = async (req, res) => {
   }
 
   try {
-    const problem = await Problem.findOne({ title: title }).select('hidden_testcases driver_code');
+    const problem = await Problem.findOne({ title: title }).select('testcase hidden_testcases driver_code');
     if (!problem) {
       return res.status(404).json({ error: 'Problem not found.' });
     }
 
-    if (!problem.hidden_testcases || problem.hidden_testcases.length === 0) {
-      return res.status(400).json({ error: 'No hidden test cases found for this problem.' });
+    // Combine visible test cases and hidden test cases for submission
+    const allTestCases = [
+      ...(problem.testcase || []),
+      ...(problem.hidden_testcases || [])
+    ];
+
+    console.log(`[SUBMIT] Running against ${problem.testcase?.length || 0} visible + ${problem.hidden_testcases?.length || 0} hidden = ${allTestCases.length} total test cases for problem: ${title}`);
+
+    if (allTestCases.length === 0) {
+      return res.status(400).json({ error: 'No test cases found for this problem.' });
     }
 
     const driverTemplate = problem.driver_code.get(language);
@@ -245,7 +255,7 @@ export const handleSubmit = async (req, res) => {
       driverTemplate,
       language,
       language_id,
-      problem.hidden_testcases,
+      allTestCases, // Run against ALL test cases (visible + hidden)
       true // true = Compare output
     );
 
@@ -278,7 +288,7 @@ export const handleSubmit = async (req, res) => {
           compile_output: decodeBase64(result.compile_output),
           stderr: decodeBase64(result.stderr),
           stdout: decodeBase64(result.stdout),
-          expected: problem.hidden_testcases[i].expected_output
+          expected: allTestCases[i].expected_output
         });
       }
     }
