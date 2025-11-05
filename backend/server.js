@@ -1,4 +1,5 @@
 import express from 'express';
+import cors from 'cors';
 import dotenv from 'dotenv';
 import connectDB from './utils/db.js';
 import problemRoutes from './routes/problem_route.js';
@@ -9,6 +10,7 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
+app.use(cors()); // Enable CORS for all origins
 app.use(express.json());
 
 // Connect to MongoDB

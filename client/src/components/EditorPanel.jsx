@@ -1,66 +1,35 @@
 import React, { useState } from 'react';
 import Editor from '@monaco-editor/react';
 
-// Default code templates for each language
-const DEFAULT_CODE = {
-  python: `def solution(nums, target):
-    # Write your code here
-    pass
-
-# Test your solution
-print(solution([2,7,11,15], 9))`,
-  javascript: `function solution(nums, target) {
-    // Write your code here
-}
-
-// Test your solution
-console.log(solution([2,7,11,15], 9));`,
-  java: `class Solution {
-    public int[] solution(int[] nums, int target) {
-        // Write your code here
-        return new int[]{};
-    }
-    
-    public static void main(String[] args) {
-        Solution sol = new Solution();
-        int[] result = sol.solution(new int[]{2,7,11,15}, 9);
-        System.out.println(java.util.Arrays.toString(result));
-    }
-}`,
-  cpp: `#include <iostream>
-#include <vector>
-using namespace std;
-
-class Solution {
-public:
-    vector<int> solution(vector<int>& nums, int target) {
-        // Write your code here
-        return {};
-    }
-};
-
-int main() {
-    Solution sol;
-    vector<int> nums = {2,7,11,15};
-    vector<int> result = sol.solution(nums, 9);
-    return 0;
-}`
-};
-
-const EditorPanel = ({ problemId, onSkip, onSubmit, timeRemaining }) => {
+const EditorPanel = ({ problem, onSkip, onSubmit, timeRemaining }) => {
   const [language, setLanguage] = useState('python');
-  const [code, setCode] = useState(DEFAULT_CODE['python']);
+  
+  // Get boilerplate code from problem object, fallback to empty string
+  const getBoilerplateCode = (lang) => {
+    if (!problem || !problem.boilerplate_code) return '';
+    return problem.boilerplate_code[lang] || '';
+  };
+  
+  const [code, setCode] = useState(getBoilerplateCode('python'));
   const [output, setOutput] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [editorHeight, setEditorHeight] = useState(60); // Percentage
   const [isDraggingVertical, setIsDraggingVertical] = useState(false);
   const panelRef = React.useRef(null);
 
+  // Update code when problem changes (e.g., moving to next question)
+  React.useEffect(() => {
+    if (problem && problem.boilerplate_code) {
+      setCode(getBoilerplateCode(language));
+      setOutput(null);
+    }
+  }, [problem]);
+
   // Handle language change
   const onLanguageChange = (event) => {
     const newLanguage = event.target.value;
     setLanguage(newLanguage);
-    setCode(DEFAULT_CODE[newLanguage]);
+    setCode(getBoilerplateCode(newLanguage));
     setOutput(null);
   };
 
@@ -131,7 +100,8 @@ const EditorPanel = ({ problemId, onSkip, onSubmit, timeRemaining }) => {
       const payload = {
         code: code,
         language: language,
-        problemId: problemId,
+        problemTitle: problem?.title || '',
+        problemId: problem?._id || '',
         timeRemaining: timeRemaining,
       };
 
