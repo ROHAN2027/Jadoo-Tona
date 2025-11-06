@@ -65,7 +65,7 @@ const ProblemDescription = ({ problem }) => {
         {/* Title and Difficulty */}
         <div className="mb-6">
           <h1 className={`text-2xl font-bold mb-3 ${isDarkMode ? 'text-gray-100' : 'text-gray-900'}`}>
-            {problem.id}. {problem.title}
+            {problem.id}{problem.title}
           </h1>
           <span
             className={`inline-block px-3 py-1 text-sm font-medium rounded-full border ${getDifficultyColor(
