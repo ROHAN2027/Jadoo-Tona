@@ -4,6 +4,8 @@ import dotenv from 'dotenv';
 import { createServer } from 'http';
 import connectDB from './utils/db.js';
 import problemRoutes from './routes/problem_route.js';
+import conceptualRoutes from './routes/conceptual_route.js';
+import interviewSessionRoutes from './routes/interview_session_route.js';
 import { setupVoiceWebSocket } from './websocket/voiceHandler.js';
 
 dotenv.config();
@@ -20,6 +22,8 @@ connectDB();
 
 // Routes
 app.use('/api/problems', problemRoutes);
+app.use('/api/conceptual', conceptualRoutes);
+app.use('/api/interview', interviewSessionRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {

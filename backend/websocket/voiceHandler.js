@@ -2,11 +2,14 @@ import { WebSocketServer } from 'ws';
 import axios from 'axios';
 import crypto from 'crypto';
 import FormData from 'form-data';
+import InterviewSession from '../models/interviewSession.model.js';
+import ConceptualQuestion from '../models/conceptualQuestion.model.js';
+import { evaluateConceptualAnswer } from '../services/geminiEvaluator.js';
 
 const VOICE_SERVICE_URL = process.env.VOICE_SERVICE_URL || 'http://localhost:8000';
 
-// Store active interview sessions
-const sessions = new Map();
+// Store active WebSocket sessions (for audio buffering, different from DB sessions)
+const wsSessions = new Map();
 
 /**
  * Generate a unique session ID
@@ -28,34 +31,30 @@ export function setupVoiceWebSocket(server) {
   console.log('WebSocket server initialized at /ws/voice');
 
   wss.on('connection', (ws, req) => {
-    const sessionId = generateSessionId();
+    const wsSessionId = generateSessionId();
     
-    // Initialize session
-    sessions.set(sessionId, {
+    // Initialize WebSocket session (for audio buffering)
+    wsSessions.set(wsSessionId, {
       audioChunks: [],
-      state: 'connected',
-      questionNumber: 0,
-      interviewType: null, // 'conceptual' or 'project'
-      conversationHistory: [],
-      totalQuestions: 5,
-      currentScore: 0
+      dbSessionId: null, // Will be set when interview starts
+      currentQuestionIndex: 0
     });
 
-    console.log(`[WebSocket] New connection: ${sessionId}`);
+    console.log(`[WebSocket] New connection: ${wsSessionId}`);
 
     // Send connection confirmation
     ws.send(JSON.stringify({ 
       type: 'connected', 
-      sessionId,
+      sessionId: wsSessionId,
       message: 'Connected to voice interview service'
     }));
 
     ws.on('message', async (message) => {
       try {
         const data = JSON.parse(message.toString());
-        await handleMessage(ws, sessionId, data);
+        await handleMessage(ws, wsSessionId, data);
       } catch (error) {
-        console.error(`[WebSocket Error] ${sessionId}:`, error);
+        console.error(`[WebSocket Error] ${wsSessionId}:`, error);
         ws.send(JSON.stringify({ 
           type: 'error', 
           message: error.message || 'An error occurred processing your request'
@@ -64,12 +63,12 @@ export function setupVoiceWebSocket(server) {
     });
 
     ws.on('close', () => {
-      console.log(`[WebSocket] Connection closed: ${sessionId}`);
-      sessions.delete(sessionId);
+      console.log(`[WebSocket] Connection closed: ${wsSessionId}`);
+      wsSessions.delete(wsSessionId);
     });
 
     ws.on('error', (error) => {
-      console.error(`[WebSocket Error] ${sessionId}:`, error);
+      console.error(`[WebSocket Error] ${wsSessionId}:`, error);
     });
   });
 
@@ -79,10 +78,10 @@ export function setupVoiceWebSocket(server) {
 /**
  * Handle incoming WebSocket messages
  */
-async function handleMessage(ws, sessionId, data) {
-  const session = sessions.get(sessionId);
+async function handleMessage(ws, wsSessionId, data) {
+  const wsSession = wsSessions.get(wsSessionId);
   
-  if (!session) {
+  if (!wsSession) {
     ws.send(JSON.stringify({ 
       type: 'error', 
       message: 'Session not found' 
@@ -90,27 +89,27 @@ async function handleMessage(ws, sessionId, data) {
     return;
   }
 
-  console.log(`[WebSocket] ${sessionId} received: ${data.type}`);
+  console.log(`[WebSocket] ${wsSessionId} received: ${data.type}`);
 
   switch (data.type) {
     case 'start_interview':
-      await handleStartInterview(ws, sessionId, data);
+      await handleStartInterview(ws, wsSessionId, data);
       break;
 
     case 'audio_chunk':
-      await handleAudioChunk(ws, sessionId, data);
+      await handleAudioChunk(ws, wsSessionId, data);
       break;
 
     case 'audio_end':
-      await handleAudioEnd(ws, sessionId, data);
+      await handleAudioEnd(ws, wsSessionId, data);
       break;
 
     case 'text_answer':
-      await handleTextAnswer(ws, sessionId, data);
+      await handleTextAnswer(ws, wsSessionId, data);
       break;
 
     case 'skip_question':
-      await handleSkipQuestion(ws, sessionId, data);
+      await handleSkipQuestion(ws, wsSessionId, data);
       break;
 
     default:
@@ -122,62 +121,105 @@ async function handleMessage(ws, sessionId, data) {
 }
 
 /**
- * Handle interview start
+ * Handle interview start - Create DB session and fetch questions
  */
-async function handleStartInterview(ws, sessionId, data) {
-  const session = sessions.get(sessionId);
-  session.interviewType = data.interviewType || 'conceptual';
-  session.state = 'interview_started';
+async function handleStartInterview(ws, wsSessionId, data) {
+  const wsSession = wsSessions.get(wsSessionId);
+  const interviewType = data.interviewType || 'conceptual';
+  const questionCount = data.questionCount || 5;
 
-  console.log(`[Interview] ${sessionId} started: ${session.interviewType}`);
+  console.log(`[Interview] ${wsSessionId} starting: ${interviewType}`);
 
-  // TODO: Generate first question based on interview type
-  // For now, send a placeholder
-  const firstQuestion = session.interviewType === 'conceptual'
-    ? "Can you explain the difference between a process and a thread?"
-    : "Tell me about the architecture of your most recent project.";
+  try {
+    // Create interview session in database
+    const dbSession = new InterviewSession({
+      sessionType: interviewType,
+      userId: data.userId || 'anonymous',
+      status: 'in_progress'
+    });
 
-  session.questionNumber = 1;
-  session.conversationHistory.push({
-    questionNumber: 1,
-    question: firstQuestion,
-    timestamp: new Date().toISOString()
-  });
+    // Fetch random questions weighted by difficulty
+    const easyCount = Math.floor(questionCount * 0.4);
+    const mediumCount = Math.floor(questionCount * 0.4);
+    const hardCount = questionCount - easyCount - mediumCount;
 
-  // Send question as text first
-  ws.send(JSON.stringify({
-    type: 'ai_question',
-    text: firstQuestion,
-    questionNumber: session.questionNumber,
-    totalQuestions: session.totalQuestions
-  }));
+    const easyQuestions = await ConceptualQuestion.aggregate([
+      { $match: { difficulty: 'Easy' } },
+      { $sample: { size: easyCount } }
+    ]);
 
-  // Convert to speech and stream audio
-  await convertTextToSpeechAndStream(ws, sessionId, firstQuestion);
+    const mediumQuestions = await ConceptualQuestion.aggregate([
+      { $match: { difficulty: 'Medium' } },
+      { $sample: { size: mediumCount } }
+    ]);
+
+    const hardQuestions = await ConceptualQuestion.aggregate([
+      { $match: { difficulty: 'Hard' } },
+      { $sample: { size: hardCount } }
+    ]);
+
+    const allQuestions = [...easyQuestions, ...mediumQuestions, ...hardQuestions];
+    const shuffled = allQuestions.sort(() => Math.random() - 0.5);
+
+    // Initialize conceptual questions in session
+    dbSession.conceptualQuestions = shuffled.map(q => ({
+      questionId: q._id,
+      category: q.category,
+      difficulty: q.difficulty,
+      questionText: q.question
+    }));
+
+    dbSession.conceptualMaxScore = shuffled.length * 10;
+    await dbSession.save();
+
+    // Store DB session ID in WebSocket session
+    wsSession.dbSessionId = dbSession._id.toString();
+    wsSession.questions = shuffled; // Store full questions for evaluation
+
+    console.log(`[Interview] ${wsSessionId} DB session created: ${dbSession._id}`);
+
+    // Send first question
+    const firstQuestion = shuffled[0];
+    ws.send(JSON.stringify({
+      type: 'ai_question',
+      text: firstQuestion.question,
+      questionNumber: 1,
+      totalQuestions: shuffled.length,
+      category: firstQuestion.category,
+      difficulty: firstQuestion.difficulty
+    }));
+
+    // Convert to speech and stream audio
+    await convertTextToSpeechAndStream(ws, wsSessionId, firstQuestion.question);
+
+  } catch (error) {
+    console.error(`[Interview Start Error] ${wsSessionId}:`, error);
+    ws.send(JSON.stringify({
+      type: 'error',
+      message: 'Failed to start interview. Please try again.'
+    }));
+  }
 }
 
 /**
  * Handle audio chunk reception
  */
-async function handleAudioChunk(ws, sessionId, data) {
-  const session = sessions.get(sessionId);
-  session.audioChunks.push(data.data);
-  
-  // Acknowledge receipt (optional)
-  // ws.send(JSON.stringify({ type: 'audio_chunk_received' }));
+async function handleAudioChunk(ws, wsSessionId, data) {
+  const wsSession = wsSessions.get(wsSessionId);
+  wsSession.audioChunks.push(data.data);
 }
 
 /**
- * Handle end of audio recording
+ * Handle end of audio recording - Process with Gemini
  */
-async function handleAudioEnd(ws, sessionId, data) {
-  const session = sessions.get(sessionId);
+async function handleAudioEnd(ws, wsSessionId, data) {
+  const wsSession = wsSessions.get(wsSessionId);
   
-  console.log(`[Audio] ${sessionId} processing ${session.audioChunks.length} chunks`);
+  console.log(`[Audio] ${wsSessionId} processing ${wsSession.audioChunks.length} chunks`);
 
   try {
     // Combine audio chunks
-    const audioBuffers = session.audioChunks.map(chunk => 
+    const audioBuffers = wsSession.audioChunks.map(chunk => 
       Buffer.from(chunk, 'base64')
     );
     const combinedBuffer = Buffer.concat(audioBuffers);
@@ -185,7 +227,7 @@ async function handleAudioEnd(ws, sessionId, data) {
     // Send to STT service
     const transcription = await speechToText(combinedBuffer, 'audio.webm');
 
-    console.log(`[STT] ${sessionId} transcription: ${transcription.substring(0, 50)}...`);
+    console.log(`[STT] ${wsSessionId} transcription: ${transcription.substring(0, 50)}...`);
 
     // Send transcription to client
     ws.send(JSON.stringify({
@@ -194,13 +236,13 @@ async function handleAudioEnd(ws, sessionId, data) {
     }));
 
     // Clear audio buffer
-    session.audioChunks = [];
+    wsSession.audioChunks = [];
 
     // Process the answer
-    await processAnswer(ws, sessionId, transcription);
+    await processAnswer(ws, wsSessionId, transcription, false);
 
   } catch (error) {
-    console.error(`[STT Error] ${sessionId}:`, error);
+    console.error(`[STT Error] ${wsSessionId}:`, error);
     ws.send(JSON.stringify({
       type: 'error',
       message: 'Failed to transcribe audio. Please try again.'
@@ -211,113 +253,153 @@ async function handleAudioEnd(ws, sessionId, data) {
 /**
  * Handle text-based answer
  */
-async function handleTextAnswer(ws, sessionId, data) {
-  console.log(`[Text Answer] ${sessionId}: ${data.text.substring(0, 50)}...`);
-  await processAnswer(ws, sessionId, data.text);
+async function handleTextAnswer(ws, wsSessionId, data) {
+  console.log(`[Text Answer] ${wsSessionId}: ${data.text.substring(0, 50)}...`);
+  await processAnswer(ws, wsSessionId, data.text, false);
 }
 
 /**
  * Handle skip question
  */
-async function handleSkipQuestion(ws, sessionId, data) {
-  const session = sessions.get(sessionId);
-  
-  // Record skip in history
-  const currentQuestion = session.conversationHistory[session.conversationHistory.length - 1];
-  if (currentQuestion) {
-    currentQuestion.answer = "[SKIPPED]";
-    currentQuestion.skipped = true;
-  }
-
-  // Move to next question
-  await moveToNextQuestion(ws, sessionId);
+async function handleSkipQuestion(ws, wsSessionId, data) {
+  await processAnswer(ws, wsSessionId, '[SKIPPED]', true);
 }
 
 /**
- * Process answer and generate next question
+ * Process answer with Gemini AI evaluation and save to DB
  */
-async function processAnswer(ws, sessionId, answerText) {
-  const session = sessions.get(sessionId);
+async function processAnswer(ws, wsSessionId, answerText, isSkipped) {
+  const wsSession = wsSessions.get(wsSessionId);
   
-  // Store answer in conversation history
-  const currentQuestion = session.conversationHistory[session.conversationHistory.length - 1];
-  if (currentQuestion) {
-    currentQuestion.answer = answerText;
-    currentQuestion.answeredAt = new Date().toISOString();
+  try {
+    // Get DB session
+    const dbSession = await InterviewSession.findById(wsSession.dbSessionId);
+    if (!dbSession) {
+      throw new Error('Database session not found');
+    }
+
+    const currentIndex = wsSession.currentQuestionIndex;
+    const currentQuestion = wsSession.questions[currentIndex];
+    const sessionQuestion = dbSession.conceptualQuestions[currentIndex];
+
+    if (!currentQuestion || !sessionQuestion) {
+      throw new Error('Question not found');
+    }
+
+    let evaluation;
+    
+    if (isSkipped) {
+      evaluation = {
+        score: 0,
+        feedback: 'Question was skipped.',
+        keyPointsCovered: [],
+        missedPoints: currentQuestion.expectedKeyPoints || []
+      };
+    } else {
+      // Evaluate with Gemini AI
+      evaluation = await evaluateConceptualAnswer(currentQuestion, answerText);
+    }
+
+    // Update session question in database
+    sessionQuestion.userAnswer = answerText;
+    sessionQuestion.transcript = answerText;
+    sessionQuestion.isSkipped = isSkipped;
+    sessionQuestion.aiEvaluation = evaluation;
+    sessionQuestion.timestamp = new Date();
+
+    // Update scores
+    dbSession.updateConceptualScore();
+    await dbSession.save();
+
+    console.log(`[Evaluation] ${wsSessionId} Score: ${evaluation.score}/10`);
+
+    // Send evaluation to client
+    ws.send(JSON.stringify({
+      type: 'evaluation',
+      score: evaluation.score,
+      feedback: evaluation.feedback,
+      keyPointsCovered: evaluation.keyPointsCovered,
+      missedPoints: evaluation.missedPoints,
+      currentScore: dbSession.conceptualTotalScore
+    }));
+
+    // Wait a moment, then move to next question
+    setTimeout(() => {
+      moveToNextQuestion(ws, wsSessionId, dbSession);
+    }, 3000); // 3 second delay to show feedback
+
+  } catch (error) {
+    console.error(`[Process Answer Error] ${wsSessionId}:`, error);
+    ws.send(JSON.stringify({
+      type: 'error',
+      message: 'Failed to process answer. Moving to next question.'
+    }));
+    
+    // Try to move to next question anyway
+    setTimeout(() => {
+      const dbSession = InterviewSession.findById(wsSession.dbSessionId);
+      moveToNextQuestion(ws, wsSessionId, dbSession);
+    }, 2000);
   }
-
-  // TODO: Send to Gemini AI for evaluation
-  // For now, use placeholder evaluation
-  const evaluation = {
-    score: Math.floor(Math.random() * 5) + 5, // Random score 5-10
-    feedback: "Good answer. Let's move to the next question."
-  };
-
-  session.currentScore += evaluation.score;
-
-  // Send evaluation
-  ws.send(JSON.stringify({
-    type: 'evaluation',
-    score: evaluation.score,
-    feedback: evaluation.feedback,
-    currentScore: session.currentScore
-  }));
-
-  // Wait a moment, then move to next question
-  setTimeout(() => {
-    moveToNextQuestion(ws, sessionId);
-  }, 2000);
 }
 
 /**
- * Move to next question or end interview
+ * Move to next question or complete interview
  */
-async function moveToNextQuestion(ws, sessionId) {
-  const session = sessions.get(sessionId);
+async function moveToNextQuestion(ws, wsSessionId, dbSession) {
+  const wsSession = wsSessions.get(wsSessionId);
   
-  if (session.questionNumber >= session.totalQuestions) {
-    // Interview complete
+  // Check if WebSocket session still exists (connection might be closed)
+  if (!wsSession) {
+    console.log(`[Question Skip] ${wsSessionId} WebSocket session not found (connection likely closed)`);
+    return;
+  }
+  
+  wsSession.currentQuestionIndex++;
+  const nextIndex = wsSession.currentQuestionIndex;
+  const totalQuestions = wsSession.questions.length;
+
+  if (nextIndex >= totalQuestions) {
+    // Interview complete - finalize DB session
+    dbSession.status = 'completed';
+    dbSession.completedAt = new Date();
+    dbSession.calculateFinalScore();
+    await dbSession.save();
+
     ws.send(JSON.stringify({
       type: 'interview_complete',
-      totalScore: session.currentScore,
-      maxScore: session.totalQuestions * 10,
-      questionsAnswered: session.conversationHistory.length
+      sessionId: dbSession._id,
+      totalScore: dbSession.conceptualTotalScore,
+      maxScore: dbSession.conceptualMaxScore,
+      questionsAnswered: totalQuestions,
+      percentage: dbSession.percentage
     }));
+    
+    console.log(`[Interview Complete] ${wsSessionId} Score: ${dbSession.conceptualTotalScore}/${dbSession.conceptualMaxScore}`);
     return;
   }
 
-  // Generate next question
-  session.questionNumber++;
+  // Send next question
+  const nextQuestion = wsSession.questions[nextIndex];
   
-  // TODO: Use AI to generate contextual follow-up questions
-  // For now, use placeholders
-  const nextQuestion = session.interviewType === 'conceptual'
-    ? `Question ${session.questionNumber}: Can you explain what a deadlock is?`
-    : `Question ${session.questionNumber}: How did you handle error scenarios in your project?`;
-
-  session.conversationHistory.push({
-    questionNumber: session.questionNumber,
-    question: nextQuestion,
-    timestamp: new Date().toISOString()
-  });
-
-  // Send question
   ws.send(JSON.stringify({
     type: 'ai_question',
-    text: nextQuestion,
-    questionNumber: session.questionNumber,
-    totalQuestions: session.totalQuestions
+    text: nextQuestion.question,
+    questionNumber: nextIndex + 1,
+    totalQuestions: totalQuestions,
+    category: nextQuestion.category,
+    difficulty: nextQuestion.difficulty
   }));
 
   // Convert to speech
-  await convertTextToSpeechAndStream(ws, sessionId, nextQuestion);
+  await convertTextToSpeechAndStream(ws, wsSessionId, nextQuestion.question);
 }
 
 /**
  * Convert text to speech using Voice Service
  * Buffers initial audio chunks for smoother playback
  */
-async function convertTextToSpeechAndStream(ws, sessionId, text) {
+async function convertTextToSpeechAndStream(ws, wsSessionId, text) {
   try {
     const response = await axios.post(
       `${VOICE_SERVICE_URL}/voice/tts`,
@@ -330,7 +412,7 @@ async function convertTextToSpeechAndStream(ws, sessionId, text) {
 
     // Buffer initial chunks for smoother playback (prevents choppy audio)
     const audioBuffer = [];
-    const BUFFER_SIZE = 50; // Buffer first 25 chunks (~2-3 seconds) before streaming
+    const BUFFER_SIZE = 50; // Buffer first 50 chunks (~2-3 seconds) before streaming
     let chunkCount = 0;
     let isBuffering = true;
 
@@ -375,11 +457,11 @@ async function convertTextToSpeechAndStream(ws, sessionId, text) {
       }
       
       ws.send(JSON.stringify({ type: 'audio_stream_end' }));
-      console.log(`[TTS] ${sessionId} audio streaming complete (buffered ${chunkCount} total chunks)`);
+      console.log(`[TTS] ${wsSessionId} audio streaming complete (buffered ${chunkCount} total chunks)`);
     });
 
     response.data.on('error', (error) => {
-      console.error(`[TTS Error] ${sessionId}:`, error);
+      console.error(`[TTS Error] ${wsSessionId}:`, error);
       ws.send(JSON.stringify({
         type: 'error',
         message: 'Failed to generate speech audio'
@@ -387,7 +469,7 @@ async function convertTextToSpeechAndStream(ws, sessionId, text) {
     });
 
   } catch (error) {
-    console.error(`[TTS Error] ${sessionId}:`, error);
+    console.error(`[TTS Error] ${wsSessionId}:`, error);
     ws.send(JSON.stringify({
       type: 'error',
       message: 'Text-to-speech service unavailable'

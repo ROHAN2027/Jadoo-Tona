@@ -4,20 +4,21 @@
 
 Jadoo-Tona is a comprehensive AI-powered technical interview platform designed to simulate real-world technical interviews across multiple dimensions:
 
-1. **DSA/LeetCode Challenges** ✅ **(Currently Implemented)**
+1. **DSA/LeetCode Challenges** ✅ **(Fully Implemented)**
    - Monaco-based code editor supporting Python, JavaScript, Java, C++
    - Real-time code execution via Judge0 API
    - Timer-based interview sessions with auto-submission
 
-2. **Conceptual Technical Questions** 🚧 **(Planned)**
-   - AI-driven questions on Operating Systems, Networking, Databases, etc.
-   - Voice/text interaction capabilities (shared with Project module)
-   - Adaptive difficulty based on responses
+2. **Voice Interview System (Conceptual Q&A)** ✅ **(Infrastructure Complete)**
+   - Real-time voice interviews with Groq TTS/STT
+   - WebSocket-based bidirectional communication
+   - Smooth audio streaming with buffering strategy
+   - Ready for Gemini AI integration (currently using placeholders)
 
-3. **Project-Specific Deep Dive** 🚧 **(Planned - GithubFeature Foundation)**
+3. **Project-Specific Deep Dive** 🚧 **(Foundation Ready)**
    - AI analyzes candidate's GitHub repositories
    - Generates contextual questions about their projects
-   - Voice/text interaction capabilities (shared with Conceptual module)
+   - Will leverage existing voice interview infrastructure
    - Probes architectural decisions, trade-offs, and design patterns
 
 4. **Performance Report Generation** 🚧 **(Planned)**
@@ -25,12 +26,12 @@ Jadoo-Tona is a comprehensive AI-powered technical interview platform designed t
    - Comprehensive feedback on candidate performance across all modules
    - Includes scores, time metrics, strengths, weaknesses, and recommendations
 
-## Current Implementation: DSA Interview Module
+## Current Implementation Status
 
-### Three Main Components
-- **Backend (Node.js/Express)**: Manages problems, orchestrates code execution via Judge0 API
-- **Client (React/Vite)**: Monaco-based code editor with interview flow management
-- **GithubFeature (FastAPI)**: Generates interview questions from GitHub repos using Gemini AI (foundation for future project interviews)
+### Three Main Services (Microservice Architecture)
+- **Backend (Node.js/Express, Port 5000)**: Manages problems, orchestrates code execution via Judge0 API, hosts WebSocket server for voice interviews
+- **Client (React/Vite, Port 3000)**: Monaco-based code editor with DSA interview flow, Voice interview UI with audio recording/playback
+- **GithubFeature (FastAPI, Port 8000)**: Voice Service (Groq TTS/STT endpoints), GitHub analysis with Gemini AI question generation
 
 ## Architecture & Design Decisions
 
