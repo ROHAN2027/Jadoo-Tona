@@ -198,6 +198,7 @@ export const handleRun = async (req, res) => {
         return {
             status: status,
             testCase: problem.testcase[index].input,
+            expectedOutput: problem.testcase[index].expected_output,
             stdout: decodeBase64(result?.stdout),
             stderr: decodeBase64(result?.stderr),
             compile_output: decodeBase64(result?.compile_output),

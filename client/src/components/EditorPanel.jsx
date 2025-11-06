@@ -272,15 +272,28 @@ const EditorPanel = ({ problem, onSkip, onSubmit, timeRemaining }) => {
                   <div className="text-sm space-y-1">
                     <div>
                       <span className="font-medium text-gray-600">Input: </span>
-                      <code className="bg-white px-2 py-1 rounded text-xs">
+                      <code className="bg-white px-2 py-1 rounded text-xs text-blue-700">
                         {result.testCase}
                       </code>
                     </div>
 
+                    {result.expectedOutput && (
+                      <div>
+                        <span className="font-medium text-gray-600">Expected Output: </span>
+                        <code className="bg-white px-2 py-1 rounded text-xs text-green-700">
+                          {result.expectedOutput}
+                        </code>
+                      </div>
+                    )}
+
                     {result.stdout && (
                       <div>
-                        <span className="font-medium text-gray-600">Output: </span>
-                        <code className="bg-white px-2 py-1 rounded text-xs">
+                        <span className="font-medium text-gray-600">Your Output: </span>
+                        <code className={`bg-white px-2 py-1 rounded text-xs ${
+                          result.expectedOutput && result.stdout.trim() === result.expectedOutput.trim() 
+                            ? 'text-green-700' 
+                            : 'text-blue-700'
+                        }`}>
                           {result.stdout.trim()}
                         </code>
                       </div>
