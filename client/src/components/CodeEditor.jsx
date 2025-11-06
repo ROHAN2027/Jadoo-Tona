@@ -83,7 +83,7 @@ const CodeEditor = ({ problem, onSkip, onSubmit, timeRemaining }) => {
         style={{ width: `${100 - leftWidth}%` }}
       >
         <EditorPanel 
-          problemId={problem.id}
+          problem={problem}
           onSkip={onSkip}
           onSubmit={onSubmit}
           timeRemaining={timeRemaining}

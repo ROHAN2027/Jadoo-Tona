@@ -29,3 +29,5 @@ Thumbs.db
 *.log
 .cache/
 .tmp/
+seed_scripts/*.js
+/backend/node_modules

@@ -1,12 +1,23 @@
 import express from 'express';
-import { handleSubmit } from '../controllers/submissionController.js';
-import { getProblem } from '../controllers/problemController.js';
+import { handleSubmit, handleRun } from '../controllers/submissionController.js';
+import { getProblem, getRandomQuestions } from '../controllers/problemController.js';
 import { createProblem } from '../controllers/problemController.js';
+
 const router = express.Router();
 
-router.get('/problems/:title', getProblem);
+// GET /api/problems/random/questions?count=5
+router.get('/random/questions', getRandomQuestions);
 
+// GET /api/problems/:title
+router.get('/:title', getProblem);
+
+// POST /api/problems/run/:title
+router.post('/run/:title', handleRun);
+
+// POST /api/problems/submit/:title
 router.post('/submit/:title', handleSubmit);
-router.post('/problems', createProblem);
-export default router;
 
+// POST /api/problems
+router.post('/', createProblem);
+
+export default router;

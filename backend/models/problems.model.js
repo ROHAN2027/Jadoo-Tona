@@ -1,59 +1,47 @@
 import mongoose from 'mongoose';
 
-const TestCaseSchema = new mongoose.Schema({
-  input: {
-    type: String,
-    required: true,
-  },
-  expected_output: {
-    type: String,
-    required: true,
-  },
+const exampleSchema = new mongoose.Schema({
+  input: { type: String, required: true },
+  output: { type: String, required: true },
+  explanation: { type: String },
 });
 
-const ProblemSchema = new mongoose.Schema({
+const testCaseSchema = new mongoose.Schema({
+  input: { type: String, required: true }, // Should be a JSON string
+  expected_output: { type: String, required: true }, // Should be a JSON string
+});
+
+const problemSchema = new mongoose.Schema({
   title: {
     type: String,
-    required: [true, 'Problem title is required'],
+    required: true,
     unique: true,
-    trim: true,
-  },
-  description: {
-    type: String,
-    required: [true, 'Problem description is required'],
   },
   difficulty: {
     type: String,
-    required: [true, 'Difficulty is required'],
-    enum: ['Easy', 'Medium', 'Hard'], 
+    enum: ['Easy', 'Medium', 'Hard'],
+    required: true,
   },
+  description: {
+    type: String,
+    required: true,
+  },
+  examples: [exampleSchema],
+  constraints: [String],
   boilerplate_code: {
     type: Map,
     of: String,
     required: true,
   },
-  
-  // --- NEW FIELD ADDED HERE ---
   driver_code: {
     type: Map,
-    of: String, // e.g., { "python": "s = Solution()...\nprint(result)" }
-    required: [true, 'Driver code is required'],
-  },
-
-  testcase: {
-    type: [TestCaseSchema],
+    of: String,
     required: true,
   },
-  examples: {
-    type: String,
-    required: [true, 'Examples are required'], // Added a more specific message
-  },
-  constraints: {
-    type: String,
-    required: [true, 'Constraints are required'], // Added a more specific message
-  }
-}, { timestamps: true }); 
+  testcase: [testCaseSchema], // For "Run" button (visible examples)
+  hidden_testcases: [testCaseSchema], // For "Submit" button
+});
 
-const Problem = mongoose.model('Problem', ProblemSchema);
+const Problem = mongoose.model('Problem', problemSchema);
 
 export default Problem;

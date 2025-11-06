@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import CodeEditor from './components/CodeEditor';
-import { sampleProblems } from './data/problems';
+
+const API_BASE_URL = 'http://localhost:5000/api/problems';
 
 function App() {
   // Interview state
@@ -10,16 +11,68 @@ function App() {
   const [timeRemaining, setTimeRemaining] = useState(null); // Time in seconds
   const [interviewComplete, setInterviewComplete] = useState(false);
   
-  // For demo: Mock interview data (will come from server later)
-  const totalQuestions = sampleProblems.length;
-  const timePerQuestion = 15 * 60; // 15 minutes per question (in seconds)
+  // Questions from backend
+  const [problems, setProblems] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
   
-  const currentProblem = sampleProblems[currentProblemIndex];
+  const totalQuestions = 2; // We'll fetch 2 questions
+  
+  const currentProblem = problems[currentProblemIndex];
 
-  // Initialize timer when component mounts or question changes
+  // Fetch questions from backend on mount
   useEffect(() => {
-    setTimeRemaining(timePerQuestion);
-  }, [currentProblemIndex]);
+    const fetchQuestions = async () => {
+      try {
+        setIsLoading(true);
+        
+        // Step 1: Get random question titles and time limits
+        const randomResponse = await fetch(`${API_BASE_URL}/random/questions?count=${totalQuestions}`);
+        if (!randomResponse.ok) {
+          throw new Error('Failed to fetch random questions');
+        }
+        const randomData = await randomResponse.json();
+        
+        // Step 2: Fetch full details for each question
+        const questionDetailsPromises = randomData.questions.map(async (q) => {
+          const detailResponse = await fetch(`${API_BASE_URL}/${encodeURIComponent(q.title)}`);
+          if (!detailResponse.ok) {
+            throw new Error(`Failed to fetch details for ${q.title}`);
+          }
+          const details = await detailResponse.json();
+          
+          // Add timeLimit from the random questions response (in seconds)
+          return {
+            ...details,
+            timeLimit: q.timeLimit * 60 // Convert minutes to seconds
+          };
+        });
+        
+        const questionsWithDetails = await Promise.all(questionDetailsPromises);
+        setProblems(questionsWithDetails);
+        
+        // Set initial timer based on first question's time limit
+        if (questionsWithDetails.length > 0) {
+          setTimeRemaining(questionsWithDetails[0].timeLimit);
+        }
+        
+        setIsLoading(false);
+      } catch (err) {
+        console.error('Error fetching questions:', err);
+        setError(err.message);
+        setIsLoading(false);
+      }
+    };
+
+    fetchQuestions();
+  }, []);
+
+  // Update timer when question changes
+  useEffect(() => {
+    if (problems.length > 0 && currentProblemIndex < problems.length) {
+      setTimeRemaining(problems[currentProblemIndex].timeLimit);
+    }
+  }, [currentProblemIndex, problems]);
 
   // Countdown timer
   useEffect(() => {
@@ -85,6 +138,36 @@ function App() {
     }
   };
 
+  // Loading screen
+  if (isLoading) {
+    return (
+      <div className="h-screen bg-gray-900 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-blue-500 mx-auto mb-4"></div>
+          <p className="text-white text-xl">Loading interview questions...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Error screen
+  if (error) {
+    return (
+      <div className="h-screen bg-gray-900 flex items-center justify-center">
+        <div className="bg-red-900 text-white rounded-lg shadow-xl p-8 max-w-md text-center">
+          <h1 className="text-2xl font-bold mb-4">Error Loading Questions</h1>
+          <p className="mb-4">{error}</p>
+          <button 
+            onClick={() => window.location.reload()} 
+            className="bg-white text-red-900 px-6 py-2 rounded-lg font-semibold hover:bg-gray-100"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   // Interview complete screen
   if (interviewComplete) {
     return (
@@ -113,6 +196,15 @@ function App() {
             Your responses have been submitted for evaluation.
           </p>
         </div>
+      </div>
+    );
+  }
+
+  // Check if problems are loaded
+  if (problems.length === 0) {
+    return (
+      <div className="h-screen bg-gray-900 flex items-center justify-center">
+        <div className="text-white text-xl">No questions available</div>
       </div>
     );
   }
