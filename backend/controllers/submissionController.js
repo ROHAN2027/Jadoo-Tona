@@ -43,9 +43,17 @@ function decodeBase64(str) {
  */
 function compareOutputs(actual, expected) {
   try {
+    // Handle null/undefined cases
+    if (!actual && !expected) return true;
+    if (!actual || !expected) return false;
+    
     // Remove whitespace and compare
-    const actualTrimmed = actual?.trim();
-    const expectedTrimmed = expected?.trim();
+    const actualTrimmed = actual.trim();
+    const expectedTrimmed = expected.trim();
+    
+    // Handle empty output
+    if (actualTrimmed === '' && expectedTrimmed !== '') return false;
+    if (actualTrimmed !== '' && expectedTrimmed === '') return false;
     
     // Try to parse as JSON and compare
     try {
@@ -138,14 +146,34 @@ async function processBatch(userCode, driverTemplate, language, language_id, tes
       const actualOutput = decodeBase64(result.stdout);
       const expectedOutput = testCases[index].expected_output;
       
+      console.log(`[COMPARE] Test Case ${index + 1}:`);
+      console.log(`  Status ID: ${result.status.id}, Description: ${result.status.description}`);
+      console.log(`  Actual Output: "${actualOutput}"`);
+      console.log(`  Expected Output: "${expectedOutput}"`);
+      
       // Only mark as accepted if status is 3 (Accepted) AND outputs match
       if (result.status.id === 3) {
         const outputsMatch = compareOutputs(actualOutput, expectedOutput);
+        console.log(`  Outputs Match: ${outputsMatch}`);
+        
         if (outputsMatch) {
-          result.status.description = 'Accepted';
+          // Return modified result with Accepted status
+          return {
+            ...result,
+            status: {
+              ...result.status,
+              description: 'Accepted'
+            }
+          };
         } else {
-          result.status.id = 4; // Wrong Answer
-          result.status.description = 'Wrong Answer';
+          // Return modified result with Wrong Answer status
+          return {
+            ...result,
+            status: {
+              id: 4,
+              description: 'Wrong Answer'
+            }
+          };
         }
       }
       
@@ -190,7 +218,7 @@ export const handleRun = async (req, res) => {
       language,
       language_id,
       problem.testcase,
-      false
+      true // Compare outputs for Run as well
     );
 
     const formattedResults = results.map((result, index) => {
