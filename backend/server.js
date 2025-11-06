@@ -1,8 +1,10 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import { createServer } from 'http';
 import connectDB from './utils/db.js';
 import problemRoutes from './routes/problem_route.js';
+import { setupVoiceWebSocket } from './websocket/voiceHandler.js';
 
 dotenv.config();
 
@@ -29,8 +31,11 @@ app.use((err, req, res, next) => {
   });
 });
 
-app.listen(PORT, () => {
+// Create HTTP server and setup WebSocket
+const server = createServer(app);
+setupVoiceWebSocket(server);
+
+server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  console.log(`WebSocket available at ws://localhost:${PORT}/ws/voice`);
 });
-
-

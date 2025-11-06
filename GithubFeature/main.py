@@ -1,15 +1,23 @@
+from dotenv import load_dotenv
+
+# Load environment variables FIRST, before any other imports
+load_dotenv()
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import requests
 import os
 import google.generativeai as genai  # <-- Import Gemini
 from bs4 import BeautifulSoup
-from dotenv import load_dotenv  # <-- 1. Import this
 
-load_dotenv()  # <-- 2. Call this function right at the top
+# Import voice service router (after load_dotenv)
+from voice_service import router as voice_router
 
 
-app = FastAPI()
+app = FastAPI(title="Jadoo-Tona AI Services API")
+
+# Include voice service routes
+app.include_router(voice_router)
 
 # --- Gemini API Configuration ---
 # Make sure you set this environment variable

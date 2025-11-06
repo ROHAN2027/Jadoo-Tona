@@ -31,3 +31,5 @@ Thumbs.db
 .tmp/
 seed_scripts/*.js
 /backend/node_modules
+
+.github/
