@@ -1,3 +1,3 @@
 .env
-seed_scripts/*.js
+backend/seed_scripts/*.js
 /backend/node_modules

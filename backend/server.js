@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { application } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import connectDB from './utils/db.js';
