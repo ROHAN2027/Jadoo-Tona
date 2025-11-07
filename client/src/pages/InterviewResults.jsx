@@ -29,8 +29,11 @@ const InterviewResults = () => {
     );
   }
 
-  const { sessionType, totalScore, maxScore, questionsAnswered } = sessionData;
+  const { sessionType, totalScore, maxScore, questionsAnswered, concentrationScore } = sessionData;
   const percentage = maxScore > 0 ? Math.round((totalScore / maxScore) * 100) : 0;
+  
+  console.log('Session Data:', sessionData); // Debug log for entire session data
+  console.log('Concentration Score:', concentrationScore); // Debug log for concentration data
 
   const getGradeColor = (percent) => {
     if (percent >= 80) return 'text-green-500';
@@ -90,7 +93,7 @@ const InterviewResults = () => {
         </div>
 
         {/* Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
           <div className="bg-gray-800 rounded-lg p-4 text-center">
             <div className="text-3xl mb-2">📊</div>
             <div className="text-2xl font-bold">{totalScore}</div>
@@ -106,8 +109,56 @@ const InterviewResults = () => {
             <div className="text-2xl font-bold">{percentage}%</div>
             <div className="text-sm text-gray-400">Accuracy</div>
           </div>
+          <div className="bg-gray-800 rounded-lg p-4 text-center">
+            <div className="text-3xl mb-2">🎯</div>
+            <div className="text-2xl font-bold">
+              {concentrationScore ? concentrationScore.scorePercentage + '%' : 'N/A'}
+            </div>
+            <div className="text-sm text-gray-400">Concentration</div>
+          </div>
         </div>
 
+        {/* Concentration Analysis */}
+        {concentrationScore && (
+          <div className="bg-gray-800 rounded-xl p-6 mb-6">
+            <h2 className="text-2xl font-bold mb-4 flex items-center">
+              <span className="mr-2">🎯</span>
+              Concentration Analysis
+            </h2>
+            <div className="mb-4">
+              <p className="text-lg text-gray-300 mb-2">
+                Overall Concentration: <span className="font-bold text-blue-400">{concentrationScore.scorePercentage}%</span>
+              </p>
+              <div className="w-full bg-gray-700 rounded-full h-4">
+                <div
+                  className="h-4 rounded-full bg-blue-500 transition-all duration-1000"
+                  style={{ width: `${concentrationScore.scorePercentage}%` }}
+                />
+              </div>
+            </div>
+            {concentrationScore.questionScores && Object.keys(concentrationScore.questionScores).length > 0 && (
+              <div className="mt-4">
+                <h3 className="text-lg font-semibold mb-3">Concentration by Question:</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {Object.entries(concentrationScore.questionScores).map(([qNum, score]) => (
+                    <div key={qNum} className="bg-gray-700 rounded-lg p-3">
+                      <div className="flex justify-between items-center">
+                        <span>Question {qNum}:</span>
+                        <span className="font-medium">{score}%</span>
+                      </div>
+                      <div className="w-full bg-gray-600 rounded-full h-2 mt-2">
+                        <div
+                          className="h-2 rounded-full bg-blue-500"
+                          style={{ width: `${score}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
         {/* Feedback Section */}
         <div className="bg-gray-800 rounded-xl p-6 mb-6">
           <h2 className="text-2xl font-bold mb-4 flex items-center">

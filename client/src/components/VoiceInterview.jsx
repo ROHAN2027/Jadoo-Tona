@@ -25,6 +25,9 @@ const VoiceInterview = ({ interviewType = 'conceptual', onComplete }) => {
   // Video state
   const [videoEnabled, setVideoEnabled] = useState(false);
   const [concentrationScore, setConcentrationScore] = useState(0);
+  const [questionConcentrationScores, setQuestionConcentrationScores] = useState({});
+  const [concentrationReadings, setConcentrationReadings] = useState({});
+  const [finalAverageConcentration, setFinalAverageConcentration] = useState(null);
   
   // Feedback state
   const [lastEvaluation, setLastEvaluation] = useState(null);
@@ -106,6 +109,18 @@ const VoiceInterview = ({ interviewType = 'conceptual', onComplete }) => {
         break;
 
       case 'ai_question':
+        // Calculate average concentration for previous question if it exists
+        if (questionNumber > 0) {
+          const readings = concentrationReadings[questionNumber] || [];
+          if (readings.length > 0) {
+            const average = readings.reduce((a, b) => a + b, 0) / readings.length;
+            setQuestionConcentrationScores(prev => ({
+              ...prev,
+              [questionNumber]: average
+            }));
+          }
+        }
+        
         setCurrentQuestion(data.text);
         setQuestionNumber(data.questionNumber);
         setTotalQuestions(data.totalQuestions);
@@ -331,9 +346,93 @@ const VoiceInterview = ({ interviewType = 'conceptual', onComplete }) => {
    * Handle interview completion
    */
   const handleInterviewComplete = (data) => {
-    console.log('Interview complete:', data);
+    try {
+      console.log('Starting interview completion...', { questionNumber, concentrationReadings });
+
+      // Calculate scores for all questions
+      const questionScores = {};
+      let totalScore = 0;
+      let questionCount = 0;
+
+      // Process all concentration readings
+      Object.entries(concentrationReadings).forEach(([qNum, readings]) => {
+        if (readings && readings.length > 0) {
+          const sum = readings.reduce((a, b) => a + b, 0);
+          const avg = sum / readings.length;
+          questionScores[qNum] = avg;
+          totalScore += avg;
+          questionCount++;
+          console.log(`Question ${qNum} average:`, avg, 'from', readings.length, 'readings');
+        }
+      });
+
+      // Calculate overall average
+      const overallAverage = questionCount > 0 ? totalScore / questionCount : 0;
+      console.log('Final calculation:', {
+        totalScore,
+        questionCount,
+        overallAverage
+      });
+
+      // Set the final average for display
+      setFinalAverageConcentration(overallAverage);
+
+      // Prepare enhanced data with concentration scores
+      const enhancedData = {
+        ...data,
+        concentrationScore: {
+          score: overallAverage,
+          scorePercentage: (overallAverage * 100).toFixed(2),
+          questionScores: Object.fromEntries(
+            Object.entries(questionScores).map(([qNum, score]) => [
+              qNum,
+              (score * 100).toFixed(2)
+            ])
+          )
+        }
+      };
+
+      console.log('Interview complete with data:', enhancedData);
+      
+      if (onComplete) {
+        onComplete(enhancedData);
+      }
+    } catch (error) {
+      console.error('Error in handleInterviewComplete:', error);
+      // Still try to complete the interview even if concentration calculation fails
+      if (onComplete) {
+        onComplete(data);
+      }
+    }
+
+    // Set the final average concentration for display
+    setFinalAverageConcentration(overallAverage);
+
+    // Add concentration scores to completion data
+    const enhancedData = {
+      ...data,
+      concentrationScore: {
+        score: overallAverage,
+        scorePercentage: (overallAverage * 100).toFixed(2),
+        questionScores: Object.fromEntries(
+          Object.entries(questionScores).map(([qNum, score]) => [
+            qNum,
+            (score * 100).toFixed(2)
+          ])
+        ),
+        debug: {
+          rawReadings: concentrationReadings,
+          questionScores: questionScores,
+          overallAverage: overallAverage
+        }
+      }
+    };
+    
+    console.log('Final data being sent:', enhancedData); // Debug log
+
+    console.log('Interview complete with concentration scores:', enhancedData);
     if (onComplete) {
-      onComplete(data);
+      onComplete(enhancedData);
     }
   };
 
@@ -408,8 +507,17 @@ const VoiceInterview = ({ interviewType = 'conceptual', onComplete }) => {
       const result = await response.json();
       console.log('API Response:', result); // Debug log
       if (result && result.concentration_score !== undefined) {
-        // Update the concentration score from the API response
-        setConcentrationScore(parseFloat(result.concentration_score));
+        const score = parseFloat(result.concentration_score);
+        setConcentrationScore(score);
+        
+        // Store the reading for current question
+        setConcentrationReadings(prev => {
+          const currentReadings = prev[questionNumber] || [];
+          return {
+            ...prev,
+            [questionNumber]: [...currentReadings, score]
+          };
+        });
       }
     } catch (err) {
       console.error('Error capturing/sending frame:', err);
@@ -438,6 +546,11 @@ const VoiceInterview = ({ interviewType = 'conceptual', onComplete }) => {
             <div className="text-lg font-semibold">
               Score: {currentScore}
             </div>
+            {finalAverageConcentration !== null && (
+              <div className="text-lg font-semibold px-4 py-1 bg-gray-800 rounded-lg">
+                Final Concentration: {(finalAverageConcentration * 100).toFixed(2)}%
+              </div>
+            )}
           </div>
         </div>
 
