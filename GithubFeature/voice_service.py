@@ -48,6 +48,14 @@ def get_groq_client() -> Groq:
 def build_audio_stream(request: SpeechRequest) -> Iterator[bytes]:
     """Generate speech audio using Groq TTS and stream it."""
     
+    # Check if mock mode is enabled (for testing without rate limits)
+    mock_mode = os.getenv("MOCK_TTS", "false").lower() == "true"
+    if mock_mode:
+        print(f"[MOCK TTS] Skipping audio generation for: {request.text[:60]}...")
+        # Return empty audio (silence) - interview continues in text mode
+        yield b''
+        return
+    
     client = get_groq_client()
     voice = request.voice or DEFAULT_TTS_VOICE
     model = request.model or DEFAULT_TTS_MODEL
@@ -81,7 +89,14 @@ def build_audio_stream(request: SpeechRequest) -> Iterator[bytes]:
         os.unlink(tmp_path)
                 
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        import groq
+        # Check if it's a rate limit error
+        if isinstance(exc, groq.RateLimitError):
+            print(f"⚠️  Groq TTS rate limit hit: {exc}")
+            # Return empty audio stream (silence) - let interview continue without voice
+            yield b''
+        else:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @router.post("/tts", response_class=StreamingResponse)

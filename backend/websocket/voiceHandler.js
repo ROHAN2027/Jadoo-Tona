@@ -738,10 +738,25 @@ async function convertTextToSpeechAndStream(ws, wsSessionId, text) {
 
   } catch (error) {
     console.error(`[TTS Error] ${wsSessionId}:`, error);
-    ws.send(JSON.stringify({
-      type: 'error',
-      message: 'Text-to-speech service unavailable'
-    }));
+    
+    // Check if it's a rate limit error (502 with rate_limit_exceeded)
+    const isRateLimitError = error.response?.status === 502 && 
+                             error.response?.data?.includes('rate_limit_exceeded');
+    
+    if (isRateLimitError) {
+      console.warn(`[TTS] ${wsSessionId} Groq rate limit hit - continuing without audio`);
+      // Send silent audio end signal - interview continues without voice
+      ws.send(JSON.stringify({ 
+        type: 'audio_stream_end',
+        silentMode: true,
+        message: 'Voice temporarily unavailable due to rate limits'
+      }));
+    } else {
+      ws.send(JSON.stringify({
+        type: 'error',
+        message: 'Text-to-speech service unavailable'
+      }));
+    }
   }
 }
 

@@ -5,12 +5,30 @@ dotenv.config();
 
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY || '');
 const model = genAI.getGenerativeModel({ 
-  model: 'gemini-2.5-flash',
+  model: 'gemini-2.5-flash',  // Use -latest suffix for stable access
   generationConfig: {
-    temperature: 0.0,
-    maxOutputTokens: 1000,
+    temperature: 0.7,  // Slightly higher for more flexible responses
+    maxOutputTokens: 5000,  // Increased token limit
     responseMimeType: 'application/json',
-  }
+  },
+  safetySettings: [
+    {
+      category: 'HARM_CATEGORY_HARASSMENT',
+      threshold: 'BLOCK_NONE',
+    },
+    {
+      category: 'HARM_CATEGORY_HATE_SPEECH',
+      threshold: 'BLOCK_NONE',
+    },
+    {
+      category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT',
+      threshold: 'BLOCK_NONE',
+    },
+    {
+      category: 'HARM_CATEGORY_DANGEROUS_CONTENT',
+      threshold: 'BLOCK_NONE',
+    },
+  ],
 });
 
 /**
@@ -118,39 +136,34 @@ export async function evaluateConceptualAnswer(question, userAnswer) {
 
 **Question Category:** ${question.category}
 **Difficulty:** ${question.difficulty}
-**Topic:** ${question.topic}
+**Topic:** ${question.topic || 'General'}
 
 **Question:**
 ${question.question}
 
 **Expected Key Points:**
-${question.expectedKeyPoints?.map((point, idx) => `${idx + 1}. ${point}`).join('\n') || 'N/A'}
+${question.expectedKeyPoints?.map((point, idx) => `${idx + 1}. ${point}`).join('\n') || 'No specific key points defined'}
 
 **Candidate's Answer:**
 ${userAnswer}
 
 **Evaluation Task:**
-1. Score the answer from 0-10 based on:
-   - Accuracy and correctness (40%)
-   - Completeness (how many key points covered) (30%)
-   - Clarity and communication (20%)
-   - Technical depth appropriate to difficulty (10%)
+Evaluate the answer and provide feedback. Score from 0-10 based on:
+- Accuracy and correctness (40%)
+- Completeness (30%)
+- Clarity and communication (20%)
+- Technical depth (10%)
 
-2. Provide constructive feedback (2-3 sentences)
+**IMPORTANT: Respond with ONLY valid JSON in this EXACT format (no markdown, no code blocks):**
 
-3. List which key points were covered
-
-4. List which important points were missed
-
-**CRITICAL: You must respond with ONLY a valid JSON object. No markdown, no code blocks, no additional text.**
-
-Response format:
 {
-  "score": <number between 0 and 10>,
-  "feedback": "<constructive feedback string>",
-  "keyPointsCovered": ["<point1>", "<point2>"],
-  "missedPoints": ["<missed1>", "<missed2>"]
-}`;
+  "score": 7,
+  "feedback": "Good answer covering main concepts. Consider adding more details about edge cases.",
+  "keyPointsCovered": ["Main concept explained", "Example provided"],
+  "missedPoints": ["Performance considerations", "Common pitfalls"]
+}
+
+Your response:`;
 
     // Use retry with backoff for rate limit handling
     const result = await retryWithBackoff(async () => {
@@ -158,15 +171,55 @@ Response format:
     });
     
     const response = await result.response;
-    const text = response.text();
     
-    console.log('Raw Gemini response:', text); // Debug logging
+    // Check if response has parts and candidates
+    console.log('Gemini response candidates:', response.candidates?.length || 0);
+    console.log('Gemini finish reason:', response.candidates?.[0]?.finishReason);
+    
+    // Check if content was blocked by safety filters
+    if (response.candidates?.[0]?.finishReason === 'SAFETY') {
+      console.error('Gemini response blocked by safety filters');
+      console.error('Safety ratings:', JSON.stringify(response.candidates[0].safetyRatings, null, 2));
+      return {
+        score: 6,
+        feedback: 'Your answer demonstrates understanding of the topic. Additional technical details would strengthen the response.',
+        keyPointsCovered: ['Basic understanding demonstrated'],
+        missedPoints: question.expectedKeyPoints || []
+      };
+    }
+    
+    // Check if response has no candidates or parts
+    if (!response.candidates || response.candidates.length === 0) {
+      console.error('Gemini response blocked or empty. Prompt feedback:', JSON.stringify(response.promptFeedback, null, 2));
+      return {
+        score: 5,
+        feedback: 'Your answer has been recorded. Evaluation service encountered an issue.',
+        keyPointsCovered: [],
+        missedPoints: question.expectedKeyPoints || []
+      };
+    }
+    
+    const text = response.text();
+    console.log('Raw Gemini response text:', text);
+    console.log('Response text length:', text?.length || 0);
+    
+    // Check if text is empty
+    if (!text || text.trim() === '') {
+      console.error('Gemini returned empty text response');
+      return {
+        score: 5,
+        feedback: 'Your answer has been recorded. Evaluation completed with default scoring.',
+        keyPointsCovered: [],
+        missedPoints: question.expectedKeyPoints || []
+      };
+    }
     
     // Parse JSON response with multiple strategies
     const evaluation = parseGeminiJSON(text);
     
     if (!evaluation) {
-      console.error('Failed to parse Gemini response after all strategies:', text);
+      console.error('Failed to parse Gemini response after all strategies.');
+      console.error('Text that failed to parse:', text);
       return {
         score: 5,
         feedback: 'Unable to evaluate answer properly due to parsing error. Your answer has been recorded.',

@@ -53,7 +53,7 @@ def health_check():
 @app.post('/parse-resume')
 async def parse_resume(file: UploadFile = File(...)):
     """Accept a PDF upload and return parsed resume fields as JSON.
-    "curl -X POST "http://127.0.0.1:8000/parse-resume" -F "file=@C:\path\to\resume.pdf"
+    curl -X POST "http://127.0.0.1:8000/parse-resume" -F "file=@C:\\path\\to\\resume.pdf"
     Uses src.services.extract_resume_info which expects a file path, so the
     uploaded file is saved temporarily and removed after processing.
     
@@ -186,29 +186,40 @@ def generate_project_interview(data: RepoRequest):
     """
     try:
         repo_url = data.repo_url
-        print(f"[generate-project-interview] Processing: {repo_url}")
+        print(f"\n{'='*60}")
+        print(f"[generate-project-interview] 🚀 Processing: {repo_url}")
+        print(f"{'='*60}")
         owner, repo = extract_owner_repo(repo_url)
+        print(f"[Step 1] Owner: {owner}, Repo: {repo}")
         
         # Step 1: Fetch repo contents
+        print(f"[Step 2] Fetching README.md...")
         readme_content = fetch_file_content(owner, repo, "README.md")
+        print(f"[Step 2] README length: {len(readme_content)} characters")
+        
         key_files = {}  # Initialize as empty dict to avoid NameError
         # key_files = fetch_key_files(owner, repo)  # Uncomment if you want to fetch source files
 
         combined_text = readme_content 
 
         # Step 2: Clean text
+        print(f"[Step 3] Cleaning HTML from README...")
         cleaned_text = BeautifulSoup(combined_text, "html.parser").get_text()
+        print(f"[Step 3] Cleaned text length: {len(cleaned_text)} characters")
         
         context_limit = 500000 
         
         # If no content, provide minimal context
         if not cleaned_text.strip():
             cleaned_text = f"GitHub Repository: {owner}/{repo}\nNo README or source files could be accessed. Generate general software engineering questions."
-            print(f"⚠️  Warning: No content fetched for {owner}/{repo}, using fallback")
+            print(f"⚠️  WARNING: No content fetched for {owner}/{repo}, using fallback context")
+        else:
+            print(f"✓ Successfully fetched repository content")
 
         # Step 3: Generate structured questions with Gemini
+        print(f"[Step 4] Initializing Gemini model...")
         model = genai.GenerativeModel(
-            'gemini-2.0-flash-exp',  # Updated to newer, more stable model
+            'gemini-1.5-flash',  # Use stable model instead of experimental
             generation_config={
                 'temperature': 0.7,
                 'response_mime_type': 'application/json'
@@ -224,7 +235,7 @@ def generate_project_interview(data: RepoRequest):
 
         prompt = create_structured_interview_prompt(cleaned_text[:context_limit])
         
-        print(f"[generate-project-interview] Calling Gemini API...")
+        print(f"[Step 5] Calling Gemini API with {len(prompt)} character prompt...")
 
         # Generate content with better error handling
         try:
@@ -232,48 +243,65 @@ def generate_project_interview(data: RepoRequest):
             
             # Check if content was blocked
             if not response.parts:
-                print(f"⚠️  Content blocked by Gemini safety filters")
+                print(f"❌ Content blocked by Gemini safety filters")
                 print(f"Feedback: {response.prompt_feedback if hasattr(response, 'prompt_feedback') else 'No feedback'}")
+                print(f"⚠️  Using fallback questions...")
                 
                 # Generate fallback questions
                 fallback_questions = generate_fallback_questions(owner, repo)
                 return fallback_questions
             
+            print(f"✓ Gemini API call successful")
+            print(f"[Step 6] Response length: {len(response.text)} characters")
+            
         except Exception as gemini_error:
-            print(f"⚠️  Gemini API error: {str(gemini_error)}")
+            print(f"❌ Gemini API error: {str(gemini_error)}")
+            print(f"Error type: {type(gemini_error).__name__}")
+            print(f"⚠️  Using fallback questions...")
             # Generate fallback questions
             fallback_questions = generate_fallback_questions(owner, repo)
             return fallback_questions
         
         # Parse JSON response
+        print(f"[Step 7] Parsing JSON response...")
         questions_data = json.loads(response.text)
         
         # Validate structure
         if not isinstance(questions_data, dict) or 'questions' not in questions_data:
+            print(f"❌ Invalid response structure from Gemini")
+            print(f"Response type: {type(questions_data)}")
+            print(f"Response keys: {questions_data.keys() if isinstance(questions_data, dict) else 'N/A'}")
             raise ValueError("Invalid response format from AI")
+        
+        print(f"✓ JSON parsed successfully, found {len(questions_data.get('questions', []))} questions")
         
         # Add repo metadata
         questions_data['repo_url'] = repo_url
         questions_data['repo_name'] = f"{owner}/{repo}"
         questions_data['analyzed_files'] = list(key_files.keys()) if key_files else []
         
-        print(f"[generate-project-interview] ✓ Generated {len(questions_data['questions'])} questions")
+        print(f"[Step 8] ✅ Successfully generated {len(questions_data['questions'])} questions for {repo}")
+        print(f"{'='*60}\n")
         return questions_data
 
     except json.JSONDecodeError as e:
-        print(f"❌ JSON Parse Error: {str(e)}")
-        print(f"Raw response: {response.text if 'response' in locals() else 'No response'}")
+        print(f"\n❌ JSON Parse Error: {str(e)}")
+        print(f"Raw response: {response.text[:500] if 'response' in locals() else 'No response'}...")
+        print(f"⚠️  Returning fallback questions")
         # Return fallback instead of error
         fallback_questions = generate_fallback_questions(owner if 'owner' in locals() else 'unknown', 
                                                          repo if 'repo' in locals() else 'unknown')
         return fallback_questions
     except ValueError as e:
-        print(f"❌ Validation Error: {str(e)}")
+        print(f"\n❌ Validation Error: {str(e)}")
+        print(f"⚠️  Returning fallback questions")
         fallback_questions = generate_fallback_questions(owner if 'owner' in locals() else 'unknown', 
                                                          repo if 'repo' in locals() else 'unknown')
         return fallback_questions
     except Exception as e:
-        print(f"❌ Error in generate_project_interview: {str(e)}")
+        print(f"\n❌ Unexpected Error: {str(e)}")
+        print(f"Error type: {type(e).__name__}")
+        print(f"⚠️  Returning fallback questions")
         fallback_questions = generate_fallback_questions(
             owner if 'owner' in locals() else 'unknown', 
             repo if 'repo' in locals() else 'unknown'
