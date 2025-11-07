@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 # Load environment variables FIRST, before any other imports
 load_dotenv()
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from pydantic import BaseModel
 import requests
 import os
@@ -13,11 +13,60 @@ from bs4 import BeautifulSoup
 # Import voice service router (after load_dotenv)
 from voice_service import router as voice_router
 
+# Resume parsing helper
+from src.services import extract_resume_info
+
 
 app = FastAPI(title="Jadoo-Tona AI Services API")
 
 # Include voice service routes
 app.include_router(voice_router)
+
+
+@app.post('/parse-resume')
+async def parse_resume(file: UploadFile = File(...)):
+    """Accept a PDF upload and return parsed resume fields as JSON.
+    "curl -X POST "http://127.0.0.1:8000/parse-resume" -F "file=@C:\path\to\resume.pdf"
+    Uses src.services.extract_resume_info which expects a file path, so the
+    uploaded file is saved temporarily and removed after processing.
+    
+    Returns:
+        {
+            "name": str | null,
+            "email": str | null,
+            "github_links": list[str]
+        }
+    """
+    if not file.filename or not file.filename.lower().endswith('.pdf'):
+        raise HTTPException(status_code=400, detail='Only PDF uploads are supported')
+
+    import tempfile, os
+
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
+            contents = await file.read()
+            tmp.write(contents)
+            tmp_path = tmp.name
+
+        parsed = extract_resume_info(tmp_path)
+
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            # Not critical if cleanup fails
+            pass
+
+        # Ensure proper JSON serialization with explicit types
+        result = {
+            "name": parsed.get("name"),
+            "email": parsed.get("email"),
+            "github_links": parsed.get("github_links", [])
+        }
+        
+        return result
+
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 # --- Gemini API Configuration ---
 # Make sure you set this environment variable
