@@ -21,6 +21,10 @@ const VoiceInterview = ({ interviewType = 'conceptual', onComplete }) => {
   const [isRecording, setIsRecording] = useState(false);
   const [isAISpeaking, setIsAISpeaking] = useState(false);
   const [transcript, setTranscript] = useState('');
+
+  // Video state
+  const [videoEnabled, setVideoEnabled] = useState(false);
+  const [concentrationScore, setConcentrationScore] = useState(0);
   
   // Feedback state
   const [lastEvaluation, setLastEvaluation] = useState(null);
@@ -35,6 +39,13 @@ const VoiceInterview = ({ interviewType = 'conceptual', onComplete }) => {
   const audioContextRef = useRef(null);
   const audioQueueRef = useRef([]);
   const isPlayingRef = useRef(false);
+  const videoRef = useRef(null);
+  const videoStreamRef = useRef(null);
+  const frameIntervalRef = useRef(null);
+
+  // Constants for video capture
+  const CONCENTRATION_API_ENDPOINT = 'https://pranavinani-gaze-emotion-api.hf.space/analyze';
+  const FRAME_CAPTURE_INTERVAL = 2000; // Capture frame every 2 seconds
 
   // Connect WebSocket on mount
   useEffect(() => {
@@ -45,6 +56,7 @@ const VoiceInterview = ({ interviewType = 'conceptual', onComplete }) => {
         wsRef.current.close();
       }
       stopRecording();
+      stopVideo();
     };
   }, []);
 
@@ -147,11 +159,13 @@ const VoiceInterview = ({ interviewType = 'conceptual', onComplete }) => {
   /**
    * Start the interview
    */
-  const startInterview = () => {
+  const startInterview = async () => {
     if (!wsRef.current || !isConnected) {
       setError('Not connected to server');
       return;
     }
+
+    await startVideo(); // Start video capture first
 
     wsRef.current.send(JSON.stringify({
       type: 'start_interview',
@@ -323,6 +337,92 @@ const VoiceInterview = ({ interviewType = 'conceptual', onComplete }) => {
     }
   };
 
+  /**
+   * Start video capture
+   */
+  const startVideo = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoStreamRef.current = stream;
+        setVideoEnabled(true);
+        startFrameCapture();
+      }
+    } catch (err) {
+      console.error('Error accessing camera:', err);
+      setError('Camera access denied or unavailable');
+    }
+  };
+
+  /**
+   * Stop video capture
+   */
+  const stopVideo = () => {
+    if (videoStreamRef.current) {
+      videoStreamRef.current.getTracks().forEach(track => track.stop());
+      videoStreamRef.current = null;
+    }
+    if (frameIntervalRef.current) {
+      clearInterval(frameIntervalRef.current);
+    }
+    setVideoEnabled(false);
+  };
+
+  /**
+   * Capture and analyze video frame
+   */
+  const captureFrame = async () => {
+    if (!videoRef.current) return;
+
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = videoRef.current.videoWidth;
+      canvas.height = videoRef.current.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(videoRef.current, 0, 0);
+
+      // Convert canvas to blob specifically as jpg
+      const blob = await new Promise(resolve => {
+        canvas.toBlob(resolve, 'image/jpg', 1.0); // Using image/jpg and max quality
+      });
+
+      // Create file from blob
+      const imageFile = new File([blob], 'frame.jpg', { type: 'image/jpg' });
+      
+      const formData = new FormData();
+      formData.append('file', imageFile); // Changed to 'file' as the field name
+
+      const response = await fetch(CONCENTRATION_API_ENDPOINT, {
+        method: 'POST',
+        // Removing any headers to let the browser set the correct multipart boundary
+        body: formData
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('API Error:', response.status, errorText);
+        return;
+      }
+
+      const result = await response.json();
+      console.log('API Response:', result); // Debug log
+      if (result && result.concentration_score !== undefined) {
+        // Update the concentration score from the API response
+        setConcentrationScore(parseFloat(result.concentration_score));
+      }
+    } catch (err) {
+      console.error('Error capturing/sending frame:', err);
+    }
+  };
+
+  /**
+   * Start periodic frame capture
+   */
+  const startFrameCapture = () => {
+    frameIntervalRef.current = setInterval(captureFrame, FRAME_CAPTURE_INTERVAL);
+  };
+
   return (
     <div className="voice-interview min-h-screen bg-gray-900 text-white p-6">
       {/* Header */}
@@ -407,6 +507,34 @@ const VoiceInterview = ({ interviewType = 'conceptual', onComplete }) => {
         {/* Interview Progress */}
         {interviewStarted && (
           <>
+            {/* Video Feed */}
+            <div className="mb-6">
+              <div className="bg-gray-800 rounded-lg p-4 mb-6">
+                <div className="relative">
+                  <video
+                    ref={videoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="w-full rounded-lg bg-gray-900"
+                  />
+                  <div className="absolute top-4 right-4 bg-gray-900/80 px-3 py-1 rounded-full text-sm">
+                    Concentration: {concentrationScore.toFixed(2)}%
+                  </div>
+                </div>
+                <button
+                  onClick={videoEnabled ? stopVideo : startVideo}
+                  className={`mt-4 px-4 py-2 rounded-lg font-medium ${
+                    videoEnabled 
+                      ? 'bg-red-600 hover:bg-red-700' 
+                      : 'bg-blue-600 hover:bg-blue-700'
+                  }`}
+                >
+                  {videoEnabled ? 'Stop Camera' : 'Start Camera'}
+                </button>
+              </div>
+            </div>
+
             {/* Progress Bar */}
             <div className="mb-6">
               <div className="flex justify-between text-sm text-gray-400 mb-2">
