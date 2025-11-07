@@ -118,9 +118,9 @@ def generate_questions(data: RepoRequest):
         
         # Step 1: Fetch repo contents
         readme_content = fetch_file_content(owner, repo, "README.md")
-        key_files = fetch_key_files(owner, repo)
+        #key_files = fetch_key_files(owner, repo)
 
-        combined_text = (readme_content or "") + "\n\n".join(key_files.values())
+        combined_text = readme_content 
 
         # Step 2: Clean text
         cleaned_text = BeautifulSoup(combined_text, "html.parser").get_text()
