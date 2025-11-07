@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { useInterview } from '../context/InterviewContext';
 import CodeEditor from '../components/CodeEditor';
 import Header from '../components/Header';
-import ProgressIndicator from '../components/ProgressIndicator';
 import { 
   LoadingScreen, 
   ErrorScreen, 
@@ -146,15 +145,12 @@ function DSAInterviewPage() {
     }, 3000); // 3 second delay to show completion screen
 
     return (
-      <div>
-        <ProgressIndicator />
-        <InterviewCompleteScreen 
-          totalQuestions={totalQuestions}
-          completedProblems={completedProblems}
-          skippedProblems={skippedProblems}
-          nextRound="Conceptual Interview"
-        />
-      </div>
+      <InterviewCompleteScreen 
+        totalQuestions={totalQuestions}
+        completedProblems={completedProblems}
+        skippedProblems={skippedProblems}
+        nextRound="Conceptual Interview"
+      />
     );
   }
 
@@ -165,9 +161,6 @@ function DSAInterviewPage() {
 
   return (
     <div className="App">
-      {/* Progress Indicator */}
-      <ProgressIndicator />
-      
       {/* Header with Timer and Progress */}
       <Header
         currentProblemIndex={currentProblemIndex}

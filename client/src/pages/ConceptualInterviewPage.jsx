@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useInterview } from '../context/InterviewContext';
 import VoiceInterview from '../components/VoiceInterview';
-import ProgressIndicator from '../components/ProgressIndicator';
 
 const ConceptualInterviewPage = () => {
   const navigate = useNavigate();
@@ -44,8 +43,6 @@ const ConceptualInterviewPage = () => {
 
   return (
     <div className="min-h-screen bg-gray-900">
-      <ProgressIndicator />
-      
       {!interviewCompleted ? (
         <VoiceInterview 
           interviewType="conceptual"
