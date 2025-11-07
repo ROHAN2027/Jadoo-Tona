@@ -4,7 +4,7 @@ import crypto from 'crypto';
 import FormData from 'form-data';
 import InterviewSession from '../models/interviewSession.model.js';
 import ConceptualQuestion from '../models/conceptualQuestion.model.js';
-import { evaluateConceptualAnswer } from '../services/geminiEvaluator.js';
+import { evaluateConceptualAnswer, generateFollowUpQuestion } from '../services/geminiEvaluator.js';
 
 const VOICE_SERVICE_URL = process.env.VOICE_SERVICE_URL || 'http://localhost:8000';
 
@@ -94,6 +94,10 @@ async function handleMessage(ws, wsSessionId, data) {
   switch (data.type) {
     case 'start_interview':
       await handleStartInterview(ws, wsSessionId, data);
+      break;
+
+    case 'start_project_interview':
+      await handleStartProjectInterview(ws, wsSessionId, data);
       break;
 
     case 'audio_chunk':
@@ -202,6 +206,105 @@ async function handleStartInterview(ws, wsSessionId, data) {
 }
 
 /**
+ * Handle project interview start - Fetch questions from GitHub repo analysis
+ */
+async function handleStartProjectInterview(ws, wsSessionId, data) {
+  const wsSession = wsSessions.get(wsSessionId);
+  const { repoUrl, userId } = data;
+
+  console.log(`[Project Interview] ${wsSessionId} starting for repo: ${repoUrl}`);
+
+  try {
+    // 1. Call GithubFeature API to generate questions
+    const response = await axios.post(
+      `${VOICE_SERVICE_URL}/generate-project-interview`,
+      { repo_url: repoUrl },
+      {
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 30000 // 30 second timeout for repo analysis
+      }
+    );
+
+    const { repo_name, questions, analyzed_files } = response.data;
+
+    if (!questions || questions.length === 0) {
+      throw new Error('No questions generated from repository analysis');
+    }
+
+    console.log(`[Project Interview] Generated ${questions.length} questions for ${repo_name}`);
+
+    // 2. Create interview session in database
+    const dbSession = new InterviewSession({
+      sessionType: 'project',
+      userId: userId || 'anonymous',
+      status: 'in_progress',
+      githubRepo: {
+        url: repoUrl,
+        name: repo_name,
+        analyzedFiles: analyzed_files || [],
+        fetchedAt: new Date()
+      }
+    });
+
+    // 3. Initialize project questions in session
+    dbSession.projectQuestions = questions.map((q, idx) => ({
+      questionId: `proj_${idx}_${Date.now()}`,
+      category: q.category || 'General',
+      difficulty: q.difficulty || 'Medium',
+      questionText: q.question,
+      context: q.context || '',
+      expectedKeyPoints: q.expectedKeyPoints || [],
+      isFollowUp: false,
+      followUpDepth: 0
+    }));
+
+    dbSession.projectMaxScore = questions.length * 10;
+    await dbSession.save();
+
+    // 4. Store in WebSocket session
+    wsSession.dbSessionId = dbSession._id.toString();
+    wsSession.questions = questions; // Store full question objects
+    wsSession.currentQuestionIndex = 0;
+    wsSession.sessionType = 'project'; // Track session type
+
+    console.log(`[Project Interview] ${wsSessionId} DB session created: ${dbSession._id}`);
+
+    // 5. Send first question
+    const firstQuestion = questions[0];
+    ws.send(JSON.stringify({
+      type: 'ai_question',
+      text: firstQuestion.question,
+      questionNumber: 1,
+      totalQuestions: questions.length,
+      category: firstQuestion.category,
+      difficulty: firstQuestion.difficulty,
+      context: firstQuestion.context,
+      isFollowUp: false
+    }));
+
+    // 6. Convert to speech and stream audio
+    await convertTextToSpeechAndStream(ws, wsSessionId, firstQuestion.question);
+
+  } catch (error) {
+    console.error(`[Project Interview Start Error] ${wsSessionId}:`, error);
+    
+    let errorMessage = 'Failed to start project interview.';
+    if (error.response?.status === 400) {
+      errorMessage = 'Could not analyze repository. Please check the URL and try again.';
+    } else if (error.code === 'ECONNREFUSED') {
+      errorMessage = 'GitHub analysis service is unavailable. Please try again later.';
+    } else if (error.code === 'ETIMEDOUT') {
+      errorMessage = 'Repository analysis timed out. Please try a smaller repository.';
+    }
+    
+    ws.send(JSON.stringify({
+      type: 'error',
+      message: errorMessage
+    }));
+  }
+}
+
+/**
  * Handle audio chunk reception
  */
 async function handleAudioChunk(ws, wsSessionId, data) {
@@ -280,10 +383,21 @@ async function processAnswer(ws, wsSessionId, answerText, isSkipped) {
 
     const currentIndex = wsSession.currentQuestionIndex;
     const currentQuestion = wsSession.questions[currentIndex];
-    const sessionQuestion = dbSession.conceptualQuestions[currentIndex];
+    const sessionType = wsSession.sessionType || 'conceptual';
 
-    if (!currentQuestion || !sessionQuestion) {
+    if (!currentQuestion) {
       throw new Error('Question not found');
+    }
+
+    // Get the appropriate question array based on session type
+    const questionArray = sessionType === 'project' 
+      ? dbSession.projectQuestions 
+      : dbSession.conceptualQuestions;
+    
+    const sessionQuestion = questionArray[currentIndex];
+
+    if (!sessionQuestion) {
+      throw new Error('Session question not found');
     }
 
     let evaluation;
@@ -296,8 +410,17 @@ async function processAnswer(ws, wsSessionId, answerText, isSkipped) {
         missedPoints: currentQuestion.expectedKeyPoints || []
       };
     } else {
+      // Prepare question object for evaluation
+      const questionForEval = {
+        question: currentQuestion.question || currentQuestion.questionText,
+        category: currentQuestion.category,
+        topic: currentQuestion.category,
+        difficulty: currentQuestion.difficulty,
+        expectedKeyPoints: currentQuestion.expectedKeyPoints || []
+      };
+      
       // Evaluate with Gemini AI
-      evaluation = await evaluateConceptualAnswer(currentQuestion, answerText);
+      evaluation = await evaluateConceptualAnswer(questionForEval, answerText);
     }
 
     // Update session question in database
@@ -307,23 +430,73 @@ async function processAnswer(ws, wsSessionId, answerText, isSkipped) {
     sessionQuestion.aiEvaluation = evaluation;
     sessionQuestion.timestamp = new Date();
 
-    // Update scores
-    dbSession.updateConceptualScore();
+    // Update scores based on session type
+    if (sessionType === 'project') {
+      dbSession.updateProjectScore();
+    } else {
+      dbSession.updateConceptualScore();
+    }
+    
     await dbSession.save();
 
     console.log(`[Evaluation] ${wsSessionId} Score: ${evaluation.score}/10`);
 
     // Send evaluation to client
+    const currentScore = sessionType === 'project' 
+      ? dbSession.projectTotalScore 
+      : dbSession.conceptualTotalScore;
+    
     ws.send(JSON.stringify({
       type: 'evaluation',
       score: evaluation.score,
       feedback: evaluation.feedback,
       keyPointsCovered: evaluation.keyPointsCovered,
       missedPoints: evaluation.missedPoints,
-      currentScore: dbSession.conceptualTotalScore
+      currentScore: currentScore
     }));
 
-    // Wait a moment, then move to next question
+    // **NEW: Check if we should ask a follow-up question**
+    const shouldAskFollowUp = !isSkipped && 
+                              evaluation.score >= 5 && 
+                              evaluation.score <= 8 &&
+                              sessionQuestion.followUpDepth === 0; // Only 1 level deep
+
+    if (shouldAskFollowUp) {
+      console.log(`[Follow-up] ${wsSessionId} Score ${evaluation.score} qualifies for follow-up`);
+      
+      // Generate follow-up question
+      const questionForFollowUp = {
+        question: currentQuestion.question || currentQuestion.questionText,
+        category: currentQuestion.category,
+        difficulty: currentQuestion.difficulty,
+        expectedKeyPoints: currentQuestion.expectedKeyPoints || []
+      };
+      
+      const followUpText = await generateFollowUpQuestion(
+        questionForFollowUp,
+        answerText,
+        evaluation.score
+      );
+      
+      if (followUpText) {
+        console.log(`[Follow-up] ${wsSessionId} Generated: ${followUpText.substring(0, 50)}...`);
+        
+        // Insert follow-up into queue
+        await insertFollowUpQuestion(
+          ws,
+          wsSessionId,
+          dbSession,
+          followUpText,
+          currentIndex,
+          sessionType
+        );
+        return; // Don't move to next question yet
+      } else {
+        console.log(`[Follow-up] ${wsSessionId} Generation returned null, skipping`);
+      }
+    }
+
+    // Normal flow: move to next question after delay
     setTimeout(() => {
       moveToNextQuestion(ws, wsSessionId, dbSession);
     }, 3000); // 3 second delay to show feedback
@@ -336,9 +509,15 @@ async function processAnswer(ws, wsSessionId, answerText, isSkipped) {
     }));
     
     // Try to move to next question anyway
-    setTimeout(() => {
-      const dbSession = InterviewSession.findById(wsSession.dbSessionId);
-      moveToNextQuestion(ws, wsSessionId, dbSession);
+    setTimeout(async () => {
+      try {
+        const dbSession = await InterviewSession.findById(wsSession.dbSessionId);
+        if (dbSession) {
+          moveToNextQuestion(ws, wsSessionId, dbSession);
+        }
+      } catch (err) {
+        console.error(`[Recovery Error] ${wsSessionId}:`, err);
+      }
     }, 2000);
   }
 }
@@ -358,6 +537,7 @@ async function moveToNextQuestion(ws, wsSessionId, dbSession) {
   wsSession.currentQuestionIndex++;
   const nextIndex = wsSession.currentQuestionIndex;
   const totalQuestions = wsSession.questions.length;
+  const sessionType = wsSession.sessionType || 'conceptual';
 
   if (nextIndex >= totalQuestions) {
     // Interview complete - finalize DB session
@@ -366,16 +546,25 @@ async function moveToNextQuestion(ws, wsSessionId, dbSession) {
     dbSession.calculateFinalScore();
     await dbSession.save();
 
+    const totalScore = sessionType === 'project' 
+      ? dbSession.projectTotalScore 
+      : dbSession.conceptualTotalScore;
+    
+    const maxScore = sessionType === 'project' 
+      ? dbSession.projectMaxScore 
+      : dbSession.conceptualMaxScore;
+
     ws.send(JSON.stringify({
       type: 'interview_complete',
       sessionId: dbSession._id,
-      totalScore: dbSession.conceptualTotalScore,
-      maxScore: dbSession.conceptualMaxScore,
+      sessionType: sessionType,
+      totalScore: totalScore,
+      maxScore: maxScore,
       questionsAnswered: totalQuestions,
       percentage: dbSession.percentage
     }));
     
-    console.log(`[Interview Complete] ${wsSessionId} Score: ${dbSession.conceptualTotalScore}/${dbSession.conceptualMaxScore}`);
+    console.log(`[Interview Complete] ${wsSessionId} Score: ${totalScore}/${maxScore}`);
     return;
   }
 
@@ -384,15 +573,94 @@ async function moveToNextQuestion(ws, wsSessionId, dbSession) {
   
   ws.send(JSON.stringify({
     type: 'ai_question',
-    text: nextQuestion.question,
+    text: nextQuestion.question || nextQuestion.questionText,
     questionNumber: nextIndex + 1,
     totalQuestions: totalQuestions,
     category: nextQuestion.category,
-    difficulty: nextQuestion.difficulty
+    difficulty: nextQuestion.difficulty,
+    context: nextQuestion.context || '',
+    isFollowUp: nextQuestion.isFollowUp || false
   }));
 
   // Convert to speech
-  await convertTextToSpeechAndStream(ws, wsSessionId, nextQuestion.question);
+  await convertTextToSpeechAndStream(ws, wsSessionId, nextQuestion.question || nextQuestion.questionText);
+}
+
+/**
+ * Insert a follow-up question dynamically into the interview flow
+ */
+async function insertFollowUpQuestion(ws, wsSessionId, dbSession, followUpText, parentIndex, sessionType) {
+  const wsSession = wsSessions.get(wsSessionId);
+  const parentQuestion = wsSession.questions[parentIndex];
+  
+  console.log(`[Follow-up Insert] ${wsSessionId} After question ${parentIndex + 1}`);
+  
+  // Create follow-up question object
+  const followUp = {
+    question: followUpText,
+    questionText: followUpText, // Support both formats
+    category: parentQuestion.category,
+    difficulty: parentQuestion.difficulty,
+    expectedKeyPoints: [], // AI will evaluate contextually
+    context: `Follow-up to previous question`,
+    isFollowUp: true,
+    followUpDepth: 1
+  };
+  
+  // Get parent question ID from DB
+  const questionArray = sessionType === 'project' 
+    ? dbSession.projectQuestions 
+    : dbSession.conceptualQuestions;
+  
+  const parentQuestionDoc = questionArray[parentIndex];
+  
+  // Create follow-up document for DB
+  const followUpDoc = {
+    questionId: `followup_${parentIndex}_${Date.now()}`,
+    category: followUp.category,
+    difficulty: followUp.difficulty,
+    questionText: followUpText,
+    context: followUp.context,
+    expectedKeyPoints: [],
+    isFollowUp: true,
+    parentQuestionId: parentQuestionDoc.questionId,
+    followUpDepth: 1
+  };
+  
+  // Insert into appropriate question array in DB
+  questionArray.push(followUpDoc);
+  
+  // Update max score (add 10 points for follow-up)
+  if (sessionType === 'project') {
+    dbSession.projectMaxScore += 10;
+  } else {
+    dbSession.conceptualMaxScore += 10;
+  }
+  
+  await dbSession.save();
+  
+  // Insert into WebSocket queue (AFTER current index)
+  wsSession.questions.splice(parentIndex + 1, 0, followUp);
+  
+  console.log(`[Follow-up Insert] ${wsSessionId} Total questions now: ${wsSession.questions.length}`);
+  
+  // Wait 2 seconds before asking follow-up
+  setTimeout(() => {
+    // Send follow-up question notification
+    ws.send(JSON.stringify({
+      type: 'ai_question',
+      text: followUpText,
+      questionNumber: parentIndex + 2, // Next number in sequence
+      totalQuestions: wsSession.questions.length,
+      isFollowUp: true,
+      category: followUp.category,
+      difficulty: followUp.difficulty,
+      context: followUp.context
+    }));
+    
+    // Convert to speech
+    convertTextToSpeechAndStream(ws, wsSessionId, followUpText);
+  }, 2000);
 }
 
 /**

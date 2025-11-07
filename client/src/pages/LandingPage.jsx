@@ -35,8 +35,8 @@ const LandingPage = () => {
       duration: '20-30 mins',
       features: ['GitHub integration', 'Architecture discussion', 'AI analysis'],
       color: 'bg-green-600 hover:bg-green-700',
-      badge: 'Coming Soon',
-      disabled: true
+      badge: 'New',
+      disabled: false
     }
   ];
 

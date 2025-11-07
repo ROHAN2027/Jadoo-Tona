@@ -159,16 +159,119 @@ const interviewSessionSchema = new mongoose.Schema({
   
   // Project Module (Future)
   projectQuestions: [{
-    githubRepo: String,
-    questionText: String,
-    userAnswer: String,
-    transcript: String,
-    aiEvaluation: {
-      score: Number,
-      feedback: String
+    questionId: {
+      type: String,
+      default: () => `proj_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
     },
-    timestamp: Date
+    
+    // Question metadata
+    category: {
+      type: String,
+      default: 'General'
+    },
+    
+    difficulty: {
+      type: String,
+      enum: ['Easy', 'Medium', 'Hard'],
+      default: 'Medium'
+    },
+    
+    questionText: {
+      type: String,
+      required: true
+    },
+    
+    context: {
+      type: String, // e.g., "Related to user authentication in auth.js"
+      default: ''
+    },
+    
+    expectedKeyPoints: {
+      type: [String],
+      default: []
+    },
+    
+    // User response
+    userAnswer: {
+      type: String,
+      default: ''
+    },
+    
+    transcript: {
+      type: String, // Raw STT output
+      default: ''
+    },
+    
+    isSkipped: {
+      type: Boolean,
+      default: false
+    },
+    
+    // Follow-up tracking
+    isFollowUp: {
+      type: Boolean,
+      default: false
+    },
+    
+    parentQuestionId: {
+      type: String,
+      default: null
+    },
+    
+    followUpDepth: {
+      type: Number,
+      default: 0, // 0 = base question, 1 = first follow-up
+      min: 0,
+      max: 1 // Maximum 1 level of follow-up
+    },
+    
+    // AI Evaluation
+    aiEvaluation: {
+      score: {
+        type: Number,
+        default: 0,
+        min: 0,
+        max: 10
+      },
+      feedback: {
+        type: String,
+        default: ''
+      },
+      keyPointsCovered: {
+        type: [String],
+        default: []
+      },
+      missedPoints: {
+        type: [String],
+        default: []
+      }
+    },
+    
+    timestamp: {
+      type: Date,
+      default: Date.now
+    }
   }],
+  
+  // GitHub repo metadata
+  githubRepo: {
+    url: {
+      type: String,
+      default: ''
+    },
+    name: {
+      type: String,
+      default: ''
+    },
+    analyzedFiles: {
+      type: [String],
+      default: []
+    },
+    fetchedAt: {
+      type: Date,
+      default: null
+    }
+  },
   
   projectTotalScore: {
     type: Number,
@@ -227,6 +330,13 @@ interviewSessionSchema.methods.updateDSAScore = function() {
 interviewSessionSchema.methods.updateConceptualScore = function() {
   this.conceptualTotalScore = this.conceptualQuestions.reduce((sum, q) => sum + (q.aiEvaluation?.score || 0), 0);
   this.conceptualMaxScore = this.conceptualQuestions.length * 10; // 10 points per question
+  this.calculateFinalScore();
+};
+
+// Method to update Project score
+interviewSessionSchema.methods.updateProjectScore = function() {
+  this.projectTotalScore = this.projectQuestions.reduce((sum, q) => sum + (q.aiEvaluation?.score || 0), 0);
+  this.projectMaxScore = this.projectQuestions.length * 10; // 10 points per question
   this.calculateFinalScore();
 };
 

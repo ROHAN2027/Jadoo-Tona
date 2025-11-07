@@ -10,6 +10,12 @@ const VoiceInterview = ({ interviewType = 'conceptual', onComplete }) => {
   const [currentQuestion, setCurrentQuestion] = useState('');
   const [questionNumber, setQuestionNumber] = useState(0);
   const [totalQuestions, setTotalQuestions] = useState(5);
+  const [questionContext, setQuestionContext] = useState('');
+  const [isFollowUp, setIsFollowUp] = useState(false);
+  
+  // Project interview specific
+  const [repoUrl, setRepoUrl] = useState('');
+  const [repoInputError, setRepoInputError] = useState(null);
   
   // Audio state
   const [isRecording, setIsRecording] = useState(false);
@@ -91,6 +97,8 @@ const VoiceInterview = ({ interviewType = 'conceptual', onComplete }) => {
         setCurrentQuestion(data.text);
         setQuestionNumber(data.questionNumber);
         setTotalQuestions(data.totalQuestions);
+        setQuestionContext(data.context || '');
+        setIsFollowUp(data.isFollowUp || false);
         setTranscript(''); // Clear previous answer
         setLastEvaluation(null);
         break;
@@ -151,6 +159,31 @@ const VoiceInterview = ({ interviewType = 'conceptual', onComplete }) => {
     }));
 
     setInterviewStarted(true);
+  };
+
+  /**
+   * Start project interview with GitHub repo
+   */
+  const startProjectInterview = () => {
+    if (!wsRef.current || !isConnected) {
+      setError('Not connected to server');
+      return;
+    }
+
+    // Validate GitHub URL
+    if (!repoUrl.match(/github\.com\/[\w-]+\/[\w-]+/)) {
+      setRepoInputError('Please enter a valid GitHub repository URL');
+      return;
+    }
+
+    wsRef.current.send(JSON.stringify({
+      type: 'start_project_interview',
+      repoUrl: repoUrl,
+      userId: 'anonymous'
+    }));
+
+    setInterviewStarted(true);
+    setRepoInputError(null);
   };
 
   /**
@@ -324,15 +357,50 @@ const VoiceInterview = ({ interviewType = 'conceptual', onComplete }) => {
         {!interviewStarted && isConnected && (
           <div className="bg-gray-800 rounded-lg p-8 text-center mb-6">
             <h2 className="text-2xl mb-4">Ready to begin?</h2>
-            <p className="text-gray-400 mb-6">
-              You'll be asked {totalQuestions} questions. You can answer using voice or skip questions.
-            </p>
-            <button
-              onClick={startInterview}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-lg font-semibold text-lg"
-            >
-              Start Interview
-            </button>
+            
+            {/* Project Interview: Show Repo Input */}
+            {interviewType === 'project' ? (
+              <>
+                <p className="text-gray-400 mb-6">
+                  Enter your GitHub repository URL to start a project-specific technical interview.
+                </p>
+                <div className="max-w-2xl mx-auto mb-6">
+                  <input
+                    type="text"
+                    value={repoUrl}
+                    onChange={(e) => setRepoUrl(e.target.value)}
+                    placeholder="https://github.com/username/repository"
+                    className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 mb-2"
+                  />
+                  {repoInputError && (
+                    <p className="text-red-400 text-sm text-left">{repoInputError}</p>
+                  )}
+                  <p className="text-gray-500 text-sm text-left mt-2">
+                    💡 The AI will analyze your repository and ask {totalQuestions} questions about your project
+                  </p>
+                </div>
+                <button
+                  onClick={startProjectInterview}
+                  disabled={!repoUrl.trim()}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-lg font-semibold text-lg disabled:bg-gray-600 disabled:cursor-not-allowed"
+                >
+                  Analyze Repository & Start Interview
+                </button>
+              </>
+            ) : (
+              /* Conceptual Interview */
+              <>
+                <p className="text-gray-400 mb-6">
+                  You'll be asked {totalQuestions} questions. You can answer using voice or skip questions.
+                </p>
+                <button
+                  onClick={startInterview}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-lg font-semibold text-lg"
+                >
+                  Start Interview
+                </button>
+              </>
+            )}
           </div>
         )}
 
@@ -362,8 +430,28 @@ const VoiceInterview = ({ interviewType = 'conceptual', onComplete }) => {
                   </svg>
                 </div>
                 <div className="flex-1">
+                  {/* Follow-up Badge */}
+                  {isFollowUp && (
+                    <div className="flex items-center text-yellow-400 text-sm mb-2">
+                      <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                      </svg>
+                      Follow-up Question
+                    </div>
+                  )}
+                  
                   <h3 className="text-xl font-semibold mb-2">Question:</h3>
                   <p className="text-lg text-gray-300">{currentQuestion || 'Loading question...'}</p>
+                  
+                  {/* Show context for project questions */}
+                  {questionContext && (
+                    <div className="mt-3 p-3 bg-gray-900 rounded border-l-4 border-blue-500">
+                      <p className="text-sm text-gray-400">
+                        <span className="text-blue-400 font-semibold">💡 Context:</span> {questionContext}
+                      </p>
+                    </div>
+                  )}
+                  
                   {isAISpeaking && (
                     <div className="mt-3 flex items-center text-blue-400">
                       <div className="animate-pulse mr-2">🔊</div>
