@@ -121,7 +121,7 @@
 ## 📁 File Structure
 
 ```
-Jadoo-Tona/
+Sarthi/
 ├── GithubFeature/
 │   ├── voice_service.py          ✅ NEW - TTS/STT endpoints
 │   ├── main.py                   ✅ MODIFIED - Added voice router

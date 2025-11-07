@@ -14,7 +14,7 @@ const Header = ({
   return (
     <header className="bg-gray-900 text-white px-6 py-3 flex items-center justify-between">
       <div className="flex items-center space-x-4">
-        <h1 className="text-xl font-bold">Jadutona</h1>
+        <h1 className="text-xl font-bold">Sarthi.ai</h1>
         <span className="text-gray-400">|</span>
         <span className="text-gray-300">AI Interview Platform</span>
       </div>

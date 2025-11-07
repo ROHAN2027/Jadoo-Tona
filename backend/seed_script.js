@@ -1,6 +1,9 @@
 import mongoose from 'mongoose';
 import Problem from './models/problems.model.js';
+import dotenv from 'dotenv';
 
+dotenv.config();
+const MONGO_URL = process.env.MONGO_URL ;
 const sampleProblems = [
   {
     title: 'Two Sum',
@@ -829,7 +832,7 @@ int main() {
 
 async function seedDatabase() {
   try {
-    await mongoose.connect('mongodb://localhost:27017/jadutona');
+    await mongoose.connect(MONGO_URL);
     console.log('Connected to MongoDB');
 
     await Problem.deleteMany({});

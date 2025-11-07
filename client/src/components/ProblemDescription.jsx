@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 
 const ProblemDescription = ({ problem }) => {
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState(true);
 
   const getDifficultyColor = (difficulty) => {
     const level = difficulty.toLowerCase();

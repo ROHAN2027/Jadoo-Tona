@@ -14,7 +14,7 @@ from bs4 import BeautifulSoup
 from voice_service import router as voice_router
 
 
-app = FastAPI(title="Jadoo-Tona AI Services API")
+app = FastAPI(title="Sarthi AI Services API")
 
 # Include voice service routes
 app.include_router(voice_router)
