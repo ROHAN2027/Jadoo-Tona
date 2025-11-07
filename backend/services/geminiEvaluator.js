@@ -7,8 +7,9 @@ const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY || '');
 const model = genAI.getGenerativeModel({ 
   model: 'gemini-2.5-flash',
   generationConfig: {
-    temperature: 0.1,
+    temperature: 0.0,
     maxOutputTokens: 1000,
+    responseMimeType: 'application/json',
   }
 });
 
@@ -29,6 +30,71 @@ async function retryWithBackoff(fn, maxRetries = 3, initialDelay = 1000) {
       }
     }
   }
+}
+
+/**
+ * Helper function to parse JSON from Gemini response with multiple strategies
+ */
+function parseGeminiJSON(text) {
+  // Strategy 1: Direct JSON parse (works if response is pure JSON)
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    // Continue to next strategy
+  }
+
+  // Strategy 2: Remove markdown code blocks
+  try {
+    const withoutCodeBlock = text.replace(/```json\s*/g, '').replace(/```\s*/g, '');
+    return JSON.parse(withoutCodeBlock);
+  } catch (e) {
+    // Continue to next strategy
+  }
+
+  // Strategy 3: Extract JSON object using regex
+  try {
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[0]);
+    }
+  } catch (e) {
+    // Continue to next strategy
+  }
+
+  // Strategy 4: Find first { and last }
+  try {
+    const firstBrace = text.indexOf('{');
+    const lastBrace = text.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+      const jsonStr = text.substring(firstBrace, lastBrace + 1);
+      return JSON.parse(jsonStr);
+    }
+  } catch (e) {
+    // Continue to next strategy
+  }
+
+  // Strategy 5: Clean up common issues and try again
+  try {
+    let cleaned = text
+      .replace(/```json/g, '')
+      .replace(/```/g, '')
+      .replace(/\n/g, ' ')
+      .replace(/\r/g, '')
+      .trim();
+    
+    // Find JSON boundaries
+    const start = cleaned.indexOf('{');
+    const end = cleaned.lastIndexOf('}');
+    
+    if (start !== -1 && end !== -1) {
+      cleaned = cleaned.substring(start, end + 1);
+      return JSON.parse(cleaned);
+    }
+  } catch (e) {
+    // All strategies failed
+  }
+
+  return null;
 }
 
 /**
@@ -76,10 +142,12 @@ ${userAnswer}
 
 4. List which important points were missed
 
-**Response Format (JSON only, no markdown):**
+**CRITICAL: You must respond with ONLY a valid JSON object. No markdown, no code blocks, no additional text.**
+
+Response format:
 {
-  "score": <number 0-10>,
-  "feedback": "<constructive feedback>",
+  "score": <number between 0 and 10>,
+  "feedback": "<constructive feedback string>",
   "keyPointsCovered": ["<point1>", "<point2>"],
   "missedPoints": ["<missed1>", "<missed2>"]
 }`;
@@ -92,24 +160,30 @@ ${userAnswer}
     const response = await result.response;
     const text = response.text();
     
-    // Parse JSON response
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      console.error('Failed to parse Gemini response:', text);
+    console.log('Raw Gemini response:', text); // Debug logging
+    
+    // Parse JSON response with multiple strategies
+    const evaluation = parseGeminiJSON(text);
+    
+    if (!evaluation) {
+      console.error('Failed to parse Gemini response after all strategies:', text);
       return {
         score: 5,
-        feedback: 'Unable to evaluate answer properly. Please try again.',
+        feedback: 'Unable to evaluate answer properly due to parsing error. Your answer has been recorded.',
         keyPointsCovered: [],
         missedPoints: question.expectedKeyPoints || []
       };
     }
 
-    const evaluation = JSON.parse(jsonMatch[0]);
+    // Validate and sanitize the response
+    const sanitizedEvaluation = {
+      score: typeof evaluation.score === 'number' ? Math.max(0, Math.min(10, evaluation.score)) : 5,
+      feedback: typeof evaluation.feedback === 'string' ? evaluation.feedback : 'Evaluation completed.',
+      keyPointsCovered: Array.isArray(evaluation.keyPointsCovered) ? evaluation.keyPointsCovered : [],
+      missedPoints: Array.isArray(evaluation.missedPoints) ? evaluation.missedPoints : (question.expectedKeyPoints || [])
+    };
     
-    // Ensure score is within bounds
-    evaluation.score = Math.max(0, Math.min(10, evaluation.score));
-    
-    return evaluation;
+    return sanitizedEvaluation;
   } catch (error) {
     console.error('Error evaluating with Gemini:', error.message || error);
     
