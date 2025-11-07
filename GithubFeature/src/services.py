@@ -78,22 +78,41 @@ def extract_name(text: str) -> Optional[str]:
     if not lines:
         return None
     
-    for line in lines[:5]:
+    for line in lines[:10]:  # Check more lines
+        # Skip lines with these keywords
         if any(keyword in line.lower() for keyword in 
                ['resume', 'cv', 'curriculum', 'profile', 'contact', 
-                'email', 'phone', 'address', 'objective', 'summary']):
+                'email', 'phone', 'address', 'objective', 'summary', 'experience']):
             continue
         
+        # Skip lines with email or URLs
         if '@' in line or 'http' in line.lower() or 'www.' in line.lower():
             continue
         
+        # Skip lines with phone numbers (digits)
+        if any(char.isdigit() for char in line):
+            continue
+        
+        # Skip lines with special characters except spaces, periods, commas
+        if any(char in line for char in ['♂', '♀', '+', '-', '(', ')', '[', ']']):
+            continue
+        
         words = line.split()
+        # Name should be 2-4 words, all alphabetic
         if len(words) >= 2 and len(words) <= 4:
             if all(word.replace('.', '').replace(',', '').isalpha() 
                    for word in words if word):
                 return line
     
-    return lines[0] if lines else None
+    # Fallback: return first line and clean it
+    first_line = lines[0] if lines else None
+    if first_line:
+        # Remove everything after special characters or numbers
+        import re
+        cleaned = re.split(r'[♂♀+\-0-9()\[\]]', first_line)[0].strip()
+        return cleaned if cleaned else first_line
+    
+    return None
 
 
 def extract_github_links(text: str) -> List[str]:

@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { useInterview } from '../context/InterviewContext';
 
 const InterviewResults = () => {
   const location = useLocation();
   const navigate = useNavigate();
+  const { name, email, completedStages, resetInterview } = useInterview();
   const [sessionData, setSessionData] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -13,10 +15,15 @@ const InterviewResults = () => {
       setSessionData(location.state);
       setLoading(false);
     } else {
-      // If no state, redirect to home
-      navigate('/');
+      // If no state, show completion screen
+      setLoading(false);
     }
-  }, [location.state, navigate]);
+  }, [location.state]);
+
+  const handleStartNewInterview = () => {
+    resetInterview();
+    navigate('/');
+  };
 
   if (loading) {
     return (
@@ -29,7 +36,7 @@ const InterviewResults = () => {
     );
   }
 
-  const { sessionType, totalScore, maxScore, questionsAnswered } = sessionData;
+  const { sessionType, totalScore, maxScore, questionsAnswered } = sessionData || {};
   const percentage = maxScore > 0 ? Math.round((totalScore / maxScore) * 100) : 0;
 
   const getGradeColor = (percent) => {
@@ -48,6 +55,37 @@ const InterviewResults = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white p-6">
+      {/* Personalized Header */}
+      <div className="max-w-5xl mx-auto mb-8">
+        <div className="text-center mb-6">
+          <h1 className="text-4xl font-bold mb-2">
+            🎉 Congratulations, {name || 'Candidate'}!
+          </h1>
+          <p className="text-gray-400 text-lg">
+            You've completed all interview rounds
+          </p>
+        </div>
+        
+        {/* Completed Stages Summary */}
+        <div className="bg-gray-800 rounded-xl p-6 mb-6">
+          <h2 className="text-xl font-semibold mb-4 text-center">Completed Rounds</h2>
+          <div className="flex justify-center items-center space-x-8">
+            {['dsa', 'conceptual', 'project'].map(stage => (
+              <div key={stage} className="text-center">
+                <div className={`
+                  w-16 h-16 rounded-full flex items-center justify-center text-2xl mb-2
+                  ${completedStages.includes(stage) ? 'bg-green-600' : 'bg-gray-600'}
+                `}>
+                  {completedStages.includes(stage) ? '✓' : '○'}
+                </div>
+                <p className={`text-sm ${completedStages.includes(stage) ? 'text-green-400' : 'text-gray-500'}`}>
+                  {stage === 'dsa' ? 'DSA' : stage === 'conceptual' ? 'Conceptual' : 'Project'}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
       <div className="max-w-4xl mx-auto">
         {/* Header */}
         <div className="text-center mb-8">

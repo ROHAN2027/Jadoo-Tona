@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useInterview } from '../context/InterviewContext';
 import CodeEditor from '../components/CodeEditor';
 import Header from '../components/Header';
+import ProgressIndicator from '../components/ProgressIndicator';
 import { 
   LoadingScreen, 
   ErrorScreen, 
@@ -18,6 +20,7 @@ import {
 
 function DSAInterviewPage() {
   const navigate = useNavigate();
+  const { name, setCurrentStage, completeStage, preloadGithubQuestions, githubLink } = useInterview();
   
   // Interview state
   const [currentProblemIndex, setCurrentProblemIndex] = useState(0);
@@ -34,6 +37,26 @@ function DSAInterviewPage() {
   const totalQuestions = 2; // We'll fetch 2 questions
   
   const currentProblem = problems[currentProblemIndex];
+  
+  const hasPreloaded = React.useRef(false);
+
+  // Set current stage on mount
+  useEffect(() => {
+    setCurrentStage('dsa');
+  }, [setCurrentStage]);
+
+  // Preload GitHub questions in background ONCE (if link available)
+  useEffect(() => {
+    if (githubLink && !interviewComplete && !hasPreloaded.current) {
+      console.log('[DSAInterviewPage] Triggering preload for:', githubLink);
+      hasPreloaded.current = true;
+      // Start preloading after a short delay (let DSA load first)
+      const timer = setTimeout(() => {
+        preloadGithubQuestions();
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [githubLink, preloadGithubQuestions, interviewComplete]);
 
   // Fetch questions from backend on mount
   useEffect(() => {
@@ -113,14 +136,25 @@ function DSAInterviewPage() {
     return <ErrorScreen error={error} />;
   }
 
-  // Interview complete screen
+  // Interview complete screen - Auto navigate to next round
   if (interviewComplete) {
+    // Mark DSA as complete and move to Conceptual
+    setTimeout(() => {
+      completeStage('dsa');
+      setCurrentStage('conceptual');
+      navigate('/conceptual');
+    }, 3000); // 3 second delay to show completion screen
+
     return (
-      <InterviewCompleteScreen 
-        totalQuestions={totalQuestions}
-        completedProblems={completedProblems}
-        skippedProblems={skippedProblems}
-      />
+      <div>
+        <ProgressIndicator />
+        <InterviewCompleteScreen 
+          totalQuestions={totalQuestions}
+          completedProblems={completedProblems}
+          skippedProblems={skippedProblems}
+          nextRound="Conceptual Interview"
+        />
+      </div>
     );
   }
 
@@ -131,6 +165,9 @@ function DSAInterviewPage() {
 
   return (
     <div className="App">
+      {/* Progress Indicator */}
+      <ProgressIndicator />
+      
       {/* Header with Timer and Progress */}
       <Header
         currentProblemIndex={currentProblemIndex}
@@ -138,10 +175,11 @@ function DSAInterviewPage() {
         timeRemaining={timeRemaining}
         completedProblems={completedProblems}
         skippedProblems={skippedProblems}
+        candidateName={name}
       />
 
       {/* Main Content */}
-      <main className="h-[calc(100vh-60px)]">
+      <main className="h-[calc(100vh-120px)]">
         <CodeEditor 
           problem={currentProblem}
           onSkip={handleSkip}

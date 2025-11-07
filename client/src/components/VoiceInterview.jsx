@@ -1,6 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 
-const VoiceInterview = ({ interviewType = 'conceptual', onComplete }) => {
+const VoiceInterview = ({ 
+  interviewType = 'conceptual', 
+  onComplete,
+  preloadedQuestions = null,
+  githubRepo = null,
+  candidateName = null 
+}) => {
   // Connection state
   const [isConnected, setIsConnected] = useState(false);
   const [sessionId, setSessionId] = useState(null);
@@ -13,8 +19,8 @@ const VoiceInterview = ({ interviewType = 'conceptual', onComplete }) => {
   const [questionContext, setQuestionContext] = useState('');
   const [isFollowUp, setIsFollowUp] = useState(false);
   
-  // Project interview specific
-  const [repoUrl, setRepoUrl] = useState('');
+  // Project interview specific - use prop if provided
+  const [repoUrl, setRepoUrl] = useState(githubRepo || '');
   const [repoInputError, setRepoInputError] = useState(null);
   
   // Audio state
@@ -35,6 +41,7 @@ const VoiceInterview = ({ interviewType = 'conceptual', onComplete }) => {
   const audioContextRef = useRef(null);
   const audioQueueRef = useRef([]);
   const isPlayingRef = useRef(false);
+  const hasAutoStarted = useRef(false);
 
   // Connect WebSocket on mount
   useEffect(() => {
@@ -48,38 +55,79 @@ const VoiceInterview = ({ interviewType = 'conceptual', onComplete }) => {
     };
   }, []);
 
+  // Auto-start project interview if GitHub repo is preloaded
+  useEffect(() => {
+    if (
+      interviewType === 'project' && 
+      githubRepo && 
+      !interviewStarted && 
+      isConnected && 
+      !hasAutoStarted.current
+    ) {
+      hasAutoStarted.current = true;
+      // Small delay to ensure WebSocket is fully ready
+      setTimeout(() => {
+        startProjectInterview();
+      }, 500);
+    }
+  }, [githubRepo, interviewStarted, isConnected, interviewType]);
+
   /**
    * Connect to WebSocket server
    */
   const connectWebSocket = () => {
-    const ws = new WebSocket('ws://localhost:5000/ws/voice');
-    
-    ws.onopen = () => {
-      console.log('WebSocket connected');
-      setIsConnected(true);
-      setError(null);
-    };
+    try {
+      console.log('[WebSocket] Attempting connection to ws://localhost:5000/ws/voice');
+      const ws = new WebSocket('ws://localhost:5000/ws/voice');
+      
+      ws.onopen = () => {
+        console.log('[WebSocket] Connected successfully');
+        setIsConnected(true);
+        setError(null);
+      };
 
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        handleWebSocketMessage(data);
-      } catch (err) {
-        console.error('Error parsing WebSocket message:', err);
-      }
-    };
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          console.log('[WebSocket] Received:', data.type);
+          handleWebSocketMessage(data);
+        } catch (err) {
+          console.error('[WebSocket] Error parsing message:', err);
+        }
+      };
 
-    ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
-      setError('Connection error occurred');
-    };
+      ws.onerror = (error) => {
+        console.error('[WebSocket] Error:', error);
+        setError('WebSocket connection error. Please ensure backend is running on port 5000.');
+        setIsConnected(false);
+      };
 
-    ws.onclose = () => {
-      console.log('WebSocket disconnected');
+      ws.onclose = (event) => {
+        console.log('[WebSocket] Disconnected. Code:', event.code, 'Reason:', event.reason);
+        setIsConnected(false);
+        
+        // Only auto-reconnect if:
+        // 1. Interview hasn't started yet
+        // 2. Connection was not closed intentionally (code 1000 = normal closure)
+        // 3. Not already attempting to reconnect
+        if (!interviewStarted && event.code !== 1000 && (!wsRef.current || wsRef.current.readyState === WebSocket.CLOSED)) {
+          console.log('[WebSocket] Will attempt reconnect in 3 seconds...');
+          setTimeout(() => {
+            // Double-check we're still not connected before reconnecting
+            if (!wsRef.current || wsRef.current.readyState === WebSocket.CLOSED) {
+              console.log('[WebSocket] Reconnecting...');
+              connectWebSocket();
+            }
+          }, 3000);
+        }
+      };
+
+      wsRef.current = ws;
+    } catch (err) {
+      console.error('[WebSocket] Failed to create connection:', err);
+      setError(`Failed to connect to WebSocket: ${err.message}`);
       setIsConnected(false);
-    };
-
-    wsRef.current = ws;
+    }
   };
 
   /**
@@ -332,8 +380,10 @@ const VoiceInterview = ({ interviewType = 'conceptual', onComplete }) => {
             {interviewType === 'conceptual' ? 'Conceptual' : 'Project'} Interview
           </h1>
           <div className="flex items-center space-x-4">
-            <div className={`px-3 py-1 rounded-full text-sm ${isConnected ? 'bg-green-600' : 'bg-red-600'}`}>
-              {isConnected ? '● Connected' : '● Disconnected'}
+            <div className={`px-3 py-1 rounded-full text-sm ${
+              isConnected ? 'bg-green-600' : wsRef.current?.readyState === WebSocket.CONNECTING ? 'bg-yellow-600' : 'bg-red-600'
+            }`}>
+              {isConnected ? '● Connected' : wsRef.current?.readyState === WebSocket.CONNECTING ? '● Connecting...' : '● Disconnected'}
             </div>
             <div className="text-lg font-semibold">
               Score: {currentScore}

@@ -1,14 +1,76 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useInterview } from '../context/InterviewContext';
 import VoiceInterview from '../components/VoiceInterview';
+import ProgressIndicator from '../components/ProgressIndicator';
 
 const ProjectInterviewPage = () => {
   const navigate = useNavigate();
+  const { 
+    name, 
+    githubLink, 
+    githubQuestions, 
+    githubQuestionsLoading,
+    githubQuestionsError,
+    setCurrentStage, 
+    completeStage 
+  } = useInterview();
+  
+  console.log('[ProjectInterviewPage] Render - Context state:', { 
+    name, 
+    githubLink, 
+    hasQuestions: !!githubQuestions,
+    questionsLoading: githubQuestionsLoading 
+  });
+  
   const [interviewComplete, setInterviewComplete] = useState(false);
+  const hasCheckedGithubLink = React.useRef(false);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Set current stage on mount
+  useEffect(() => {
+    setCurrentStage('project');
+  }, [setCurrentStage]);
+
+  // Wait for context to stabilize before checking GitHub link
+  useEffect(() => {
+    // Give context more time to load from localStorage
+    const stabilizeTimer = setTimeout(() => {
+      setIsLoading(false);
+    }, 300);
+
+    return () => clearTimeout(stabilizeTimer);
+  }, []);
+
+  // Redirect if no GitHub link - ONCE only using ref
+  useEffect(() => {
+    // Don't check until loading is complete
+    if (isLoading) return;
+
+    if (!hasCheckedGithubLink.current) {
+      hasCheckedGithubLink.current = true;
+      
+      console.log('[ProjectInterviewPage] Checking GitHub link:', githubLink);
+      console.log('[ProjectInterviewPage] Full context:', { name, githubLink, hasQuestions: !!githubQuestions });
+      
+      if (!githubLink || githubLink === null) {
+        console.log('[ProjectInterviewPage] No GitHub link found, redirecting to results...');
+        alert('No GitHub link found in your resume. Skipping to results...');
+        setTimeout(() => {
+          navigate('/results');
+        }, 1000);
+      } else {
+        console.log('[ProjectInterviewPage] GitHub link found:', githubLink);
+      }
+    }
+  }, [isLoading, githubLink, navigate, name, githubQuestions]);
 
   const handleInterviewComplete = (data) => {
     console.log('Project Interview Complete:', data);
     setInterviewComplete(true);
+    
+    // Mark all stages as complete
+    completeStage('project');
     
     // Navigate to results page with data
     setTimeout(() => {
@@ -23,6 +85,9 @@ const ProjectInterviewPage = () => {
 
   return (
     <div className="min-h-screen bg-gray-900">
+      {/* Progress Indicator */}
+      <ProgressIndicator />
+      
       {/* Header */}
       <div className="bg-gray-800 border-b border-gray-700 px-6 py-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
@@ -40,14 +105,16 @@ const ProjectInterviewPage = () => {
                 🚀 Project Deep Dive Interview
                 <span className="ml-3 px-2 py-1 text-xs bg-green-600 rounded-full">Live</span>
               </h1>
-              <p className="text-sm text-gray-400">AI-powered technical interview on your GitHub project</p>
+              <p className="text-sm text-gray-400">
+                {githubLink ? `Analyzing: ${githubLink}` : 'AI-powered technical interview on your GitHub project'}
+              </p>
             </div>
           </div>
           
           <div className="flex items-center space-x-4">
             <div className="text-right">
-              <div className="text-sm text-gray-400">Interview Type</div>
-              <div className="text-white font-semibold">Project Deep Dive</div>
+              <div className="text-sm text-gray-400">Candidate</div>
+              <div className="text-white font-semibold">{name || 'Guest'}</div>
             </div>
           </div>
         </div>
@@ -55,17 +122,42 @@ const ProjectInterviewPage = () => {
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto">
-        {!interviewComplete ? (
+        {githubQuestionsLoading ? (
+          <div className="flex items-center justify-center min-h-[60vh]">
+            <div className="text-center text-white">
+              <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-500 mx-auto mb-4"></div>
+              <p className="text-xl">Analyzing your GitHub repository...</p>
+              <p className="text-sm text-gray-400 mt-2">Generating contextual questions</p>
+            </div>
+          </div>
+        ) : githubQuestionsError ? (
+          <div className="flex items-center justify-center min-h-[60vh]">
+            <div className="text-center text-white max-w-md">
+              <div className="text-6xl mb-4">⚠️</div>
+              <h2 className="text-2xl font-bold mb-2">Failed to Load Questions</h2>
+              <p className="text-gray-400 mb-4">{githubQuestionsError}</p>
+              <button
+                onClick={() => navigate('/results')}
+                className="px-6 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+              >
+                Go to Results
+              </button>
+            </div>
+          </div>
+        ) : !interviewComplete ? (
           <VoiceInterview 
             interviewType="project" 
             onComplete={handleInterviewComplete}
+            preloadedQuestions={githubQuestions}
+            githubRepo={githubLink}
+            candidateName={name}
           />
         ) : (
-          <div className="flex items-center justify-center min-h-[80vh]">
+          <div className="flex items-center justify-center min-h-[60vh]">
             <div className="text-center">
               <div className="text-6xl mb-4">🎉</div>
-              <h2 className="text-3xl font-bold text-white mb-2">Interview Complete!</h2>
-              <p className="text-gray-400 mb-4">Redirecting to results...</p>
+              <h2 className="text-3xl font-bold text-white mb-2">All Rounds Complete!</h2>
+              <p className="text-gray-400 mb-4">Generating your comprehensive report...</p>
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto"></div>
             </div>
           </div>

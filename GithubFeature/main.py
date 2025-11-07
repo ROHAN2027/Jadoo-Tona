@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import requests
 import os
@@ -19,6 +20,20 @@ from src.services import extract_resume_info
 
 
 app = FastAPI(title="Sarthi AI Services API")
+
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5173",  # Vite default
+        "http://127.0.0.1:5173"
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Include voice service routes
 app.include_router(voice_router)
@@ -96,7 +111,10 @@ class RepoRequest(BaseModel):
 def generate_questions(data: RepoRequest):
     try:
         repo_url = data.repo_url
+        print(f"[generate-questions] Received request for: {repo_url}")
+        
         owner, repo = extract_owner_repo(repo_url)
+        print(f"[generate-questions] Extracted owner: {owner}, repo: {repo}")
         
         # Step 1: Fetch repo contents
         readme_content = fetch_file_content(owner, repo, "README.md")
@@ -110,8 +128,23 @@ def generate_questions(data: RepoRequest):
         # We can use a much larger context with Gemini 1.5
         context_limit = 500000 
         
+        # If no content fetched, generate fallback questions
         if not cleaned_text.strip():
-            raise HTTPException(status_code=400, detail="Could not fetch or read repository content.")
+            print(f"⚠️  [generate-questions] No content fetched for {owner}/{repo}")
+            print(f"⚠️  This could be due to:")
+            print(f"   - Private repository (needs authentication)")
+            print(f"   - GitHub API rate limit (add GITHUB_TOKEN to .env)")
+            print(f"   - Repository doesn't exist or is empty")
+            print(f"⚠️  Generating fallback questions...")
+            
+            # Use fallback context
+            cleaned_text = f"""
+            GitHub Repository: {owner}/{repo}
+            URL: {repo_url}
+            
+            Note: Unable to fetch repository contents. This may be a private repository or 
+            the GitHub API rate limit has been reached. Generating general project questions.
+            """
 
         # Step 3: --- Swapped to Gemini ---
         
@@ -124,18 +157,25 @@ def generate_questions(data: RepoRequest):
         prompt = create_detailed_prompt(cleaned_text[:context_limit])
 
         # Generate content
+        print(f"[generate-questions] Calling Gemini API...")
         response = model.generate_content(prompt)
 
         # Extract the text
         questions = response.text.strip()
+        print(f"[generate-questions] ✓ Generated {len(questions)} characters of questions")
         
         return {"questions": questions}
 
+    except ValueError as e:
+        # URL parsing error
+        print(f"[generate-questions] ValueError: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Invalid GitHub URL: {str(e)}")
     except Exception as e:
         # Catch potential Gemini API errors (e.g., safety blocks)
-        if 'response' in locals() and not response.parts:
+        print(f"[generate-questions] Exception: {str(e)}")
+        if 'response' in locals() and hasattr(response, 'prompt_feedback') and not response.parts:
              raise HTTPException(status_code=500, detail=f"Content generation blocked. Feedback: {response.prompt_feedback}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Error generating questions: {str(e)}")
 
 
 @app.post("/generate-project-interview")
@@ -320,8 +360,12 @@ def fetch_file_content(owner, repo, path):
     api_url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path}"
     # Add a token if you have one to avoid rate limiting
     headers = {}
-    if "GITHUB_TOKEN" in os.environ:
-         headers["Authorization"] = f"token {os.getenv('GITHUB_TOKEN')}"
+    github_token = os.getenv('GITHUB_TOKEN')
+    if github_token and github_token != 'your_github_token_here':
+        headers["Authorization"] = f"token {github_token}"
+    else:
+        # Without token, we have 60 requests/hour per IP
+        print("⚠️  No GitHub token configured - using unauthenticated requests (60/hour limit)")
     
     try:
         r = requests.get(api_url, headers=headers, timeout=10)
@@ -333,6 +377,12 @@ def fetch_file_content(owner, repo, path):
                 decoded = base64.b64decode(data["content"]).decode("utf-8", errors="ignore")
                 print(f"✓ Fetched {path}: {len(decoded)} characters")
                 return decoded
+        elif r.status_code == 401:
+            print(f"✗ Authentication failed for {path}. Check GITHUB_TOKEN or repo access.")
+        elif r.status_code == 404:
+            print(f"✗ File not found: {path}")
+        elif r.status_code == 403:
+            print(f"✗ Rate limit exceeded for {path}. Add GITHUB_TOKEN to .env")
         else:
             print(f"✗ Failed to fetch {path}: Status {r.status_code}")
     except Exception as e:
@@ -345,8 +395,9 @@ def fetch_key_files(owner, repo):
     """Fetch 3-5 main source files (like app.py, main.js, etc.)"""
     api_url = f"https://api.github.com/repos/{owner}/{repo}/contents"
     headers = {}
-    if "GITHUB_TOKEN" in os.environ:
-         headers["Authorization"] = f"token {os.getenv('GITHUB_TOKEN')}"
+    github_token = os.getenv('GITHUB_TOKEN')
+    if github_token and github_token != 'your_github_token_here':
+        headers["Authorization"] = f"token {github_token}"
 
     r = requests.get(api_url, headers=headers)
     key_files = {}
