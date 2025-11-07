@@ -1,5 +1,5 @@
 import express from 'express';
-import { handleSubmit, handleRun } from '../controllers/submissionController.js';
+import { handleSubmit, handleRun, saveCodeSnapshot } from '../controllers/submissionController.js';
 import { getProblem, getRandomQuestions } from '../controllers/problemController.js';
 import { createProblem } from '../controllers/problemController.js';
 
@@ -16,6 +16,9 @@ router.post('/run/:title', handleRun);
 
 // POST /api/problems/submit/:title
 router.post('/submit/:title', handleSubmit);
+
+// POST /api/problems/snapshot/:title - Save code without running
+router.post('/snapshot/:title', saveCodeSnapshot);
 
 // POST /api/problems
 router.post('/', createProblem);

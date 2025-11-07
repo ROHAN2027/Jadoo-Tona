@@ -1,5 +1,6 @@
 import axios from 'axios';
 import Problem from '../models/problems.model.js';
+import Submission from '../models/submission.model.js';
 import 'dotenv/config'; 
 
 // --- ADD THESE CONSTANTS ---
@@ -245,7 +246,7 @@ export const handleRun = async (req, res) => {
 
 export const handleSubmit = async (req, res) => {
   const { title } = req.params;
-  const { code, language } = req.body;
+  const { code, language, sessionId = 'default-session' } = req.body; // Default sessionId
 
   if (!code || !language) {
     return res.status(400).json({ error: 'Code and language are required.' });
@@ -295,11 +296,32 @@ export const handleSubmit = async (req, res) => {
       });
     }
 
+    // Calculate test cases passed
+    let testCasesPassed = 0;
+    let finalStatus = 'Wrong Answer';
+    let executionTime = 0;
+    let memoryUsed = 0;
+
     // Check results for the first failure
     for (let i = 0; i < results.length; i++) {
       const result = results[i];
       
       if (!result || !result.status) {
+        // Save failed submission before returning
+        await Submission.saveOrUpdateBest({
+          sessionId,
+          problemTitle: title,
+          problemId: problem._id,
+          code,
+          language,
+          result: 'Runtime Error',
+          testCasesPassed: 0,
+          totalTestCases: results.length,
+          executionTime: 0,
+          memoryUsed: 0,
+          submittedAt: new Date()
+        });
+
         return res.status(500).json({
           error: 'Invalid result from code execution service.',
           testCaseNumber: i + 1,
@@ -308,12 +330,36 @@ export const handleSubmit = async (req, res) => {
       }
 
       const status = result.status.description;
+      
+      // Accumulate execution metrics
+      if (result.time) executionTime += parseFloat(result.time) * 1000; // Convert to ms
+      if (result.memory) memoryUsed = Math.max(memoryUsed, parseInt(result.memory));
 
-      if (status !== 'Accepted') {
+      if (status === 'Accepted') {
+        testCasesPassed++;
+      } else {
+        finalStatus = status;
+        
+        // Save submission with partial pass
+        await Submission.saveOrUpdateBest({
+          sessionId,
+          problemTitle: title,
+          problemId: problem._id,
+          code,
+          language,
+          result: finalStatus,
+          testCasesPassed,
+          totalTestCases: results.length,
+          executionTime: Math.round(executionTime),
+          memoryUsed,
+          submittedAt: new Date()
+        });
+
         return res.status(200).json({
           status: status,
           testCaseNumber: i + 1,
           totalTestCases: results.length,
+          testCasesPassed,
           compile_output: decodeBase64(result.compile_output),
           stderr: decodeBase64(result.stderr),
           stdout: decodeBase64(result.stdout),
@@ -322,15 +368,77 @@ export const handleSubmit = async (req, res) => {
       }
     }
 
+    // All test cases passed
+    await Submission.saveOrUpdateBest({
+      sessionId,
+      problemTitle: title,
+      problemId: problem._id,
+      code,
+      language,
+      result: 'Accepted',
+      testCasesPassed: results.length,
+      totalTestCases: results.length,
+      executionTime: Math.round(executionTime),
+      memoryUsed,
+      submittedAt: new Date()
+    });
+
     return res.status(200).json({ 
         status: 'Accepted',
-        totalTestCases: results.length 
+        totalTestCases: results.length,
+        testCasesPassed: results.length
     });
 
   } catch (error) {
     console.error('Submission Error:', error.response?.data || error.message);
     res.status(500).json({ 
       error: 'An internal server error occurred.', 
+      details: error.message
+    });
+  }
+};
+
+/**
+ * Save code snapshot without running (for skipped questions or timer expiry)
+ */
+export const saveCodeSnapshot = async (req, res) => {
+  const { title } = req.params;
+  const { code, language, sessionId = 'default-session' } = req.body; // Default sessionId
+
+  if (!code || !language) {
+    return res.status(400).json({ error: 'Code and language are required.' });
+  }
+
+  try {
+    const problem = await Problem.findOne({ title: title }).select('_id');
+    if (!problem) {
+      return res.status(404).json({ error: 'Problem not found.' });
+    }
+
+    // Save last written code (always updates)
+    await Submission.saveLastSubmission({
+      sessionId,
+      problemTitle: title,
+      problemId: problem._id,
+      code,
+      language,
+      result: 'Not Submitted',
+      testCasesPassed: 0,
+      totalTestCases: 0,
+      executionTime: 0,
+      memoryUsed: 0,
+      submittedAt: new Date()
+    });
+
+    return res.status(200).json({ 
+      message: 'Code snapshot saved successfully',
+      problemTitle: title
+    });
+
+  } catch (error) {
+    console.error('Save Snapshot Error:', error.message);
+    res.status(500).json({ 
+      error: 'Failed to save code snapshot.', 
       details: error.message
     });
   }
