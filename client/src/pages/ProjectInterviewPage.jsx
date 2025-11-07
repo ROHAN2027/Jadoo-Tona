@@ -9,18 +9,13 @@ const ProjectInterviewPage = () => {
   const { 
     name, 
     githubLink, 
-    githubQuestions, 
-    githubQuestionsLoading,
-    githubQuestionsError,
     setCurrentStage, 
     completeStage 
   } = useInterview();
   
   console.log('[ProjectInterviewPage] Render - Context state:', { 
     name, 
-    githubLink, 
-    hasQuestions: !!githubQuestions,
-    questionsLoading: githubQuestionsLoading 
+    githubLink
   });
   
   const [interviewComplete, setInterviewComplete] = useState(false);
@@ -51,7 +46,7 @@ const ProjectInterviewPage = () => {
       hasCheckedGithubLink.current = true;
       
       console.log('[ProjectInterviewPage] Checking GitHub link:', githubLink);
-      console.log('[ProjectInterviewPage] Full context:', { name, githubLink, hasQuestions: !!githubQuestions });
+      console.log('[ProjectInterviewPage] Full context:', { name, githubLink });
       
       if (!githubLink || githubLink === null) {
         console.log('[ProjectInterviewPage] No GitHub link found, redirecting to results...');
@@ -63,7 +58,7 @@ const ProjectInterviewPage = () => {
         console.log('[ProjectInterviewPage] GitHub link found:', githubLink);
       }
     }
-  }, [isLoading, githubLink, navigate, name, githubQuestions]);
+  }, [isLoading, githubLink, navigate, name]);
 
   const handleInterviewComplete = (data) => {
     console.log('Project Interview Complete:', data);
@@ -122,33 +117,10 @@ const ProjectInterviewPage = () => {
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto">
-        {githubQuestionsLoading ? (
-          <div className="flex items-center justify-center min-h-[60vh]">
-            <div className="text-center text-white">
-              <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-500 mx-auto mb-4"></div>
-              <p className="text-xl">Analyzing your GitHub repository...</p>
-              <p className="text-sm text-gray-400 mt-2">Generating contextual questions</p>
-            </div>
-          </div>
-        ) : githubQuestionsError ? (
-          <div className="flex items-center justify-center min-h-[60vh]">
-            <div className="text-center text-white max-w-md">
-              <div className="text-6xl mb-4">⚠️</div>
-              <h2 className="text-2xl font-bold mb-2">Failed to Load Questions</h2>
-              <p className="text-gray-400 mb-4">{githubQuestionsError}</p>
-              <button
-                onClick={() => navigate('/results')}
-                className="px-6 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
-              >
-                Go to Results
-              </button>
-            </div>
-          </div>
-        ) : !interviewComplete ? (
+        {!interviewComplete ? (
           <VoiceInterview 
             interviewType="project" 
             onComplete={handleInterviewComplete}
-            preloadedQuestions={githubQuestions}
             githubRepo={githubLink}
             candidateName={name}
           />

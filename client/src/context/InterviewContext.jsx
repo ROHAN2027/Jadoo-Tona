@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 
 const InterviewContext = createContext();
 
@@ -68,9 +68,9 @@ export const InterviewProvider = ({ children }) => {
         sessionId: `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
       }));
     }
-  }, []);
+  }, [interviewData.sessionId]);
 
-  const setUserInfo = (name, email, githubLinks) => {
+  const setUserInfo = useCallback((name, email, githubLinks) => {
     console.log('[InterviewContext] setUserInfo called with:', { name, email, githubLinks });
     
     // Handle both array and single link
@@ -105,81 +105,30 @@ export const InterviewProvider = ({ children }) => {
         });
       }
     }, 100);
-  };
+  }, []);
 
-  const setCurrentStage = (stage) => {
+  const setCurrentStage = useCallback((stage) => {
     setInterviewData(prev => ({
       ...prev,
       currentStage: stage
     }));
-  };
+  }, []);
 
-  const completeStage = (stage) => {
+  const completeStage = useCallback((stage) => {
     setInterviewData(prev => ({
       ...prev,
       completedStages: [...prev.completedStages, stage]
     }));
-  };
+  }, []);
 
-  const preloadGithubQuestions = async () => {
-    // Use functional update to get the latest state
-    setInterviewData(prev => {
-      // Check if already loaded, loading, or no link
-      if (!prev.githubLink || prev.githubQuestions || prev.githubQuestionsLoading) {
-        console.log('[InterviewContext] Skipping preload:', {
-          hasLink: !!prev.githubLink,
-          hasQuestions: !!prev.githubQuestions,
-          isLoading: prev.githubQuestionsLoading
-        });
-        return prev; // No state change
-      }
+  const preloadGithubQuestions = useCallback(async () => {
+    // NOTE: This function is intentionally a no-op
+    // GitHub questions are now fetched by WebSocket handler on backend
+    // to avoid duplicate API calls and ensure structured format
+    console.log('[InterviewContext] preloadGithubQuestions called - delegating to WebSocket handler');
+  }, []);
 
-      console.log('[InterviewContext] Starting GitHub questions preload for:', prev.githubLink);
-      
-      // Start loading - this prevents duplicate calls
-      const newState = {
-        ...prev,
-        githubQuestionsLoading: true,
-        githubQuestionsError: null
-      };
-
-      // Fetch questions asynchronously
-      (async () => {
-        try {
-          const response = await fetch('http://localhost:8000/generate-questions', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ repo_url: prev.githubLink })
-          });
-
-          if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`Failed to fetch GitHub questions: ${response.status} ${errorText}`);
-          }
-
-          const data = await response.json();
-          console.log('[InterviewContext] ✓ GitHub questions loaded:', data.questions?.substring(0, 100) + '...');
-          
-          setInterviewData(current => ({
-            ...current,
-            githubQuestions: data.questions,
-            githubQuestionsLoading: false
-          }));
-        } catch (error) {
-          console.error('[InterviewContext] Error preloading GitHub questions:', error);
-          setInterviewData(current => ({
-            ...current,
-            githubQuestionsError: error.message,
-            githubQuestionsLoading: false
-          }));
-        }
-      })();
-
-      return newState;
-    });
-  };
-
-  const resetInterview = () => {
+  const resetInterview = useCallback(() => {
     const resetData = {
       name: null,
       email: null,
@@ -196,7 +145,7 @@ export const InterviewProvider = ({ children }) => {
     // Clear localStorage
     localStorage.removeItem('interviewData');
     console.log('[InterviewContext] Interview reset, localStorage cleared');
-  };
+  }, []);
 
   const value = {
     ...interviewData,

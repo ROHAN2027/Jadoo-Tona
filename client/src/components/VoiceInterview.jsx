@@ -199,7 +199,17 @@ const VoiceInterview = ({
       case 'audio_stream_end':
         // Now play all buffered audio at once
         setIsAISpeaking(false);
-        playAudioQueue();
+        
+        // Check if this is silent mode (rate limit hit)
+        if (data.silentMode) {
+          console.warn('[VoiceInterview] Voice unavailable (rate limit), continuing in text mode');
+          // Show notification to user
+          setError('Voice temporarily unavailable. Interview continues in text mode.');
+          setTimeout(() => setError(null), 5000); // Clear after 5 seconds
+          audioQueueRef.current = []; // Clear any partial audio
+        } else {
+          playAudioQueue();
+        }
         break;
 
       case 'transcription':
